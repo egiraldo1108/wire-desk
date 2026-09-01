@@ -628,9 +628,11 @@ const FEEDS = [
   {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
   {id:'reuters',name:'Reuters',            cat:'wires', kind:'rss', url:GN('site:reuters.com when:1d')},
   {id:'ap',     name:'AP',                 cat:'wires', kind:'rss', url:GN('site:apnews.com when:1d')},
-  {id:'bbc',    name:'BBC World',          cat:'wires', kind:'rss', url:'https://feeds.bbci.co.uk/news/world/rss.xml'},
+  {id:'ustop',  name:'U.S. top stories',   cat:'wires', kind:'rss', url:GTOP('en-US','US')},
+  {id:'usnat',  name:'U.S. national',      cat:'wires', kind:'rss', url:GN('"United States" news when:1d')},
 
   /* ---- world ---- */
+  {id:'bbc',    name:'BBC World',          cat:'world', kind:'rss', url:'https://feeds.bbci.co.uk/news/world/rss.xml'},
   {id:'npr',    name:'NPR',                cat:'world', kind:'rss', url:'https://feeds.npr.org/1001/rss.xml'},
   {id:'guard',  name:'Guardian World',     cat:'world', kind:'rss', url:'https://www.theguardian.com/world/rss'},
   {id:'ajz',    name:'Al Jazeera',         cat:'world', kind:'rss', url:'https://www.aljazeera.com/xml/rss/all.xml'},
@@ -1206,18 +1208,38 @@ async function nameUSPoint(L){
 }
 async function setLocation(L){
   if (!L || !L.lat) return;
+  const previous = state.loc;
   if (!L.city || !L.forecast) await nameUSPoint(L);
+
+  /* Moving the pin has to take the old town's stories with it, or you end
+     up reading the last ZIP's headlines under the new one's name. */
+  if (previous && previous.city !== L.city){
+    const stale = ['loc-news','loc-state','loc-alerts'].map(function(id){
+      const f = locFeedsFor(previous).filter(function(x){ return x.id === id; })[0];
+      return f ? f.name : null;
+    }).filter(Boolean);
+    [...state.clusters].forEach(function(pair){
+      const c = pair[1];
+      const only = [...c.sources].every(function(src){ return stale.indexOf(src) >= 0; });
+      if (only) state.clusters.delete(pair[0]);
+    });
+    locFeedsFor(previous).forEach(function(f){ if (f.url) CACHE.delete(f.url); delete state.health[f.id]; });
+    state.forecast = [];
+  }
+
   state.loc = L;
   drawLoc(); save();
   loadWeather(); loadForecast();
-  const fresh = locFeeds();
-  fresh.forEach(function(f){ pull(f).then(function(){ drawSources(); draw(); }); });
-  drawSources();
+  locFeeds().forEach(function(f){
+    if (f.url) CACHE.delete(f.url);
+    pull(f).then(function(){ drawSources(); drawTabs(); draw(); });
+  });
+  drawSources(); drawTabs(); draw();
 }
 
 /* Feeds that only exist once we know where "here" is. */
-function locFeeds(){
-  const L = state.loc;
+function locFeeds(){ return locFeedsFor(state.loc); }
+function locFeedsFor(L){
   if (!L || !L.lat) return [];
   const out = [];
   if (L.city){
@@ -1690,29 +1712,68 @@ function nextChannel(){
   drawCatalog();
 }
 
+/* Wires carry the whole planet. A story about the US military in Gaza is
+   still world news, so any headline naming a foreign place or people is
+   routed to World no matter which wire it came off. */
+const FOREIGN = ('gaza israel israeli palestin hamas hezbollah lebanon syria iran iranian iraq yemen houthi '
++ 'ukraine ukrainian russia russian moscow kyiv kremlin putin belarus poland polish germany german berlin '
++ 'france french paris britain british london england uk scotland ireland irish spain spanish madrid italy '
++ 'italian rome greece greek turkey turkish ankara china chinese beijing taiwan hong kong japan japanese '
++ 'tokyo korea korean seoul pyongyang india indian delhi pakistan pakistani afghan afghanistan bangladesh '
++ 'vietnam thailand thai philippines indonesia malaysia singapore australia australian sydney canada '
++ 'canadian ottawa toronto mexico mexican brazil brazilian argentina venezuela colombia colombian chile '
++ 'peru bolivia ecuador cuba cuban haiti nigeria nigerian kenya ethiopia sudan sudanese egypt egyptian '
++ 'cairo libya algeria morocco tunisia south africa zimbabwe congo somalia mali niger saudi emirates uae '
++ 'qatar kuwait bahrain oman jordan lebanon nato kremlin eu european union brussels vatican zelensky '
++ 'netanyahu maduro xi jinping modi macron starmer').split(' ').filter(Boolean);
+
+function isForeign(c){
+  if (c.wx) return false;
+  const t = ' ' + (c.rep.title || '').toLowerCase() + ' ';
+  for (let i = 0; i < FOREIGN.length; i++){
+    const w = FOREIGN[i];
+    if (t.indexOf(' ' + w) >= 0) return true;
+  }
+  return false;
+}
+const hasCat = (c, list) => [...c.cats].some(function(x){ return list.indexOf(x) >= 0; });
+
 /* ============ sections ============
    Nine tabs over one stream. "All" is a digest — the four biggest stories
    from each section — and each tab opens the full list for that section.
    Badges count what has arrived since you last opened that tab. */
 const TABS = [
-  {id:'all',      label:'All',      cats:null},
-  {id:'t-local',  label:'Local',    cats:['local']},
-  {id:'t-state',  label:'State',    cats:['state']},
-  {id:'t-us',     label:'U.S.',     cats:['wires','hazard']},
-  {id:'t-pol',    label:'Politics', cats:['politics']},
-  {id:'t-world',  label:'World',    cats:['world','espanol']},
-  {id:'t-social', label:'Social',   cats:['social']},
-  {id:'t-reads',  label:'Reads',    cats:['reads']},
-  {id:'t-mine',   label:'Yours',    cats:['mine','search']}
+  {id:'all',      label:'All',      cats:null, match:null},
+  {id:'t-local',  label:'Local',    cats:['local'],
+   match: c => hasCat(c,['local'])},
+  {id:'t-state',  label:'State',    cats:['state'],
+   match: c => hasCat(c,['state'])},
+  {id:'t-us',     label:'U.S.',     cats:['wires'],
+   match: c => hasCat(c,['wires']) && !isForeign(c)},
+  {id:'t-pol',    label:'Politics', cats:['politics'],
+   match: c => hasCat(c,['politics'])},
+  {id:'t-world',  label:'World',    cats:['world','espanol','wires'],
+   match: c => hasCat(c,['world','espanol']) || (hasCat(c,['wires']) && isForeign(c))},
+  {id:'t-quake',  label:'Quakes & alerts', cats:['hazard'],
+   match: c => hasCat(c,['hazard'])},
+  {id:'t-social', label:'Social',   cats:['social'],
+   match: c => hasCat(c,['social'])},
+  {id:'t-reads',  label:'Reads',    cats:['reads'],
+   match: c => hasCat(c,['reads'])},
+  {id:'t-mine',   label:'Yours',    cats:['mine','search'],
+   match: c => hasCat(c,['mine','search'])}
 ];
 const DIGEST_PER_SECTION = 4;
 
-function clustersFor(cats){
+function clustersFor(tab){
+  const cats = tab && tab.cats;
+  const match = tab && tab.match;
   const f = $('#filter').value.trim().toLowerCase();
   let out = [...state.clusters.values()].filter(function(c){
-    return [...c.cats].some(function(x){
-      return state.on.has(x) && (!cats || cats.indexOf(x) >= 0);
-    });
+    const enabled = [...c.cats].some(function(x){ return state.on.has(x); });
+    if (!enabled) return false;
+    if (!cats) return true;
+    return match ? match(c) : hasCat(c, cats);
   });
   if (f) out = out.filter(function(c){
     return (c.rep.title + ' ' + [...c.sources].join(' ')).toLowerCase().indexOf(f) >= 0;
@@ -1729,7 +1790,7 @@ function clustersFor(cats){
 function newCount(tab){
   const since = (state.seen && state.seen[tab.id]) || 0;
   if (!since) return 0;
-  return clustersFor(tab.cats).filter(function(c){ return !c.wx && c.first > since; }).length;
+  return clustersFor(tab).filter(function(c){ return !c.wx && c.first > since; }).length;
 }
 
 function drawTabs(){
@@ -1760,6 +1821,7 @@ function tierOf(c){
   if (t.has('local')) return 0;
   if (t.has('state')) return 1;
   if (t.has('world') || t.has('espanol')) return 3;
+  if (t.has('wires') && isForeign(c)) return 3;   // US military in Gaza is still world news
   return 2;
 }
 const TIER_WEIGHT = [2.4, 1.7, 1.15, 0.45];
@@ -1858,7 +1920,7 @@ function drawDigest(terms){
   let html = '', total = 0;
   TABS.forEach(function(t){
     if (t.id === 'all') return;
-    const rows = clustersFor(t.cats);
+    const rows = clustersFor(t);
     if (!rows.length) return;
     const n = newCount(t);
     total += rows.length;
@@ -1895,7 +1957,7 @@ function draw(){
     if (total) return;
   }
 
-  const rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab.cats)).slice(0,200);
+  const rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab)).slice(0,200);
   $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : '—';
 
   if (!rows.length){
