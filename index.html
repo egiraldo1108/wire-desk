@@ -318,6 +318,9 @@ window.setTimeout(function(){
       <div class="chips" style="margin-top:8px">
         <button class="chip" data-vid="c:UCoMdktPbSTixAyNGwb-UYkQ">Sky News</button>
         <button class="chip" data-vid="c:UCzG5BnqHO8oNlrPDW9CYJog">Sky en Español</button>
+        <button class="chip" data-yt="@TraderTVLive">TraderTV</button>
+        <button class="chip" data-yt="@NinjaTrader">NinjaTrader</button>
+        <button class="chip" data-yt="@SmoothTraderTV">Smooth Trader</button>
         <button class="chip" id="vidoff">Off</button>
       </div>
       <p class="hint" id="vidnote" style="min-height:1em"></p>
@@ -346,6 +349,7 @@ window.setTimeout(function(){
         <button class="chip" data-cf="en">English</button>
         <button class="chip" data-cf="es">Español</button>
         <button class="chip" data-cf="yt">Live video</button>
+        <button class="chip" data-cf="mk">Markets</button>
       </div>
       <div id="catalog" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
       <p class="hint">Free, no accounts. Sources abroad route through Google News' per-country feed, which is far steadier than each outlet's own RSS.</p>
@@ -459,7 +463,13 @@ const RELAYS = [
    A single global cap of three meant forty feeds crawled through a
    three-wide door; nine relays at three apiece is up to 27 in flight
    while still never hammering any one proxy. */
-const PER_RELAY = 3;
+/* Three at a time per relay is polite when several are up. When only one
+   is answering, politeness just means a two-minute load, so it widens. */
+let PER_RELAY = 3;
+function tunePool(){
+  const up = activeRelays().filter(function(r){ return !(r.fails >= 3 && r.wins === 0); }).length;
+  PER_RELAY = up <= 1 ? 6 : (up === 2 ? 4 : 3);
+}
 
 /* A relay you host yourself is the only one that never throttles.
    Paste a Cloudflare Worker URL in the rail and it takes priority. */
@@ -509,7 +519,7 @@ function timedFetch(url, ms){
 
 /* Short-lived cache: a redraw or a second category touching the same
    feed shouldn't cost another round trip. */
-const CACHE = new Map(), CACHE_MS = 90000;
+const CACHE = new Map(), CACHE_MS = 240000;   // 4 min — just under the refresh interval
 
 async function relayFetch(url){
   const hit = CACHE.get(url);
@@ -986,12 +996,25 @@ async function searchWires(q){
   catch(e){ state.health.nsearch={ok:false}; }
 }
 
+/* How often each category is worth re-fetching. On one slow relay the
+   difference between 45 requests a cycle and 20 is the difference between
+   a usable page and a spinner. */
+const CADENCE = {local:1, state:1, wires:1, hazard:1, search:1,
+                 politics:2, world:2, espanol:2, social:2, mine:2, reads:3};
+let cycle = 0;
+
 async function loadAll(){
   if (state.loading) return;
   state.loading = true;
+  cycle++;
+  tunePool();
   $('#status').textContent = 'Fetching…';
 
-  const jobs = allFeeds().filter(f => state.on.has(f.cat));
+  const PRIORITY = ['local','state','wires','hazard','search','politics','world','espanol','social','mine','reads'];
+  const jobs = allFeeds()
+    .filter(f => state.on.has(f.cat))
+    .filter(f => cycle % (CADENCE[f.cat] || 1) === 0 || !state.health[f.id])
+    .sort((a,b) => PRIORITY.indexOf(a.cat) - PRIORITY.indexOf(b.cat));
   const watches = state.on.has('social') ? state.watches : [];
   const total = jobs.length + watches.length + (state.query?2:0) || 1;
 
@@ -1541,7 +1564,13 @@ const CATALOG = [
   {n:'RTVE Noticias',       r:'España',    l:'es', k:'yt', h:'@rtvenoticias'},
   {n:'Noticias Caracol',    r:'Colombia',  l:'es', k:'yt', h:'@NoticiasCaracol'},
   {n:'El Tiempo',           r:'Colombia',  l:'es', k:'yt', h:'@eltiempo'},
-  {n:'Milenio',             r:'México',    l:'es', k:'yt', h:'@milenio'}
+  {n:'Milenio',             r:'México',    l:'es', k:'yt', h:'@milenio'},
+
+  /* --- markets. These stream during market hours, not around the clock,
+         so outside those hours the channel simply has nothing live. --- */
+  {n:'TraderTV Live',       r:'Markets',   l:'en', k:'yt', h:'@TraderTVLive'},
+  {n:'NinjaTrader',         r:'Markets',   l:'en', k:'yt', h:'@NinjaTrader'},
+  {n:'Smooth Trader TV',    r:'Markets',   l:'en', k:'yt', h:'@SmoothTraderTV'}
 ];
 let catFilter = 'all';
 
@@ -1551,6 +1580,7 @@ function catalogRows(){
     if (catFilter === 'en' && e.l !== 'en') return false;
     if (catFilter === 'es' && e.l !== 'es') return false;
     if (catFilter === 'yt' && e.k !== 'yt') return false;
+    if (catFilter === 'mk' && e.r !== 'Markets') return false;
     if (!q) return true;
     return (e.n + ' ' + e.r + ' ' + (e.l === 'es' ? 'espanol spanish' : 'english')).toLowerCase().indexOf(q) >= 0;
   });
@@ -1917,7 +1947,7 @@ document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
     setVideo(cached);
     return;
   }
-  acceptVideo('https://www.youtube.com/' + handle, b.textContent, handle);
+  acceptVideo('https://www.youtube.com/' + handle, b.textContent.trim(), handle);
 });
 
 $('#zipgo').onclick = async () => {
