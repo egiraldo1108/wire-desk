@@ -1,0 +1,180 @@
+# Wire Desk
+
+Single-file live news monitor. Drop `index.html` in a repo, turn on GitHub Pages, done. No build, no keys, no server.
+
+Tuned for three things at once: **breaking local (Rhode Island)**, **breaking world**, **politics and elections** — plus a slow lane of longer reads that never competes with them.
+
+## The main idea: pickup count
+
+Most feed readers dedupe identical stories and throw the duplicates away. That's backwards — the duplicates *are* the signal. One outlet running something is a report. Five outlets running it inside an hour is an event.
+
+So headlines get grouped into stories by word overlap, and each story shows how many outlets have it. Sort order weights pickup count alongside recency, and anything picked up by 3+ outlets within an hour gets a **picking up** badge and triggers an alert.
+
+The timestamp shown is when the story *first* appeared, and the link goes to whoever broke it.
+
+## Alerts
+
+Click "Turn on desktop alerts" and the browser asks permission. After that you get a notification when:
+
+- a story hits 3+ outlets inside an hour, or
+- a watchword shows up in a headline under 2 hours old
+
+The tab title shows an unread count, and there's an optional chime. Nothing fires on first load, so you don't get blasted on open.
+
+## Categories
+
+| Category | What's in it |
+|---|---|
+| **Local** | WPRI 12, Rhode Island Current, Providence Journal, The Public's Radio, ecoRI, WBUR, a Google News query for RI/Providence/Woonsocket/North Smithfield, RI-only NWS weather alerts |
+| **Wires** | Google News breaking (6h), Reuters, AP, BBC World |
+| **World** | NPR, Guardian, Al Jazeera, DW, France 24, CBC, GDELT's global index |
+| **Politics** | NPR Politics, The Hill, Politico, Guardian US politics, National Review, Reason, RealClearPolitics, plus a live elections/ballots/recount query |
+| **Hazards** | USGS earthquakes, nationwide NWS alerts |
+| **Social** | Whatever you add — Bluesky, Mastodon, Reddit |
+| **Reads** | Hacker News front page, The Atlantic, Aeon, Quanta, Nautilus, Longreads, The Marginalian, MIT Tech Review, The Verge |
+
+**On the politics lineup:** it deliberately spans left, center, and right so the pickup count means something. A story that five outlets across the spectrum are running is different from one that five outlets on the same side are running — and you can only see that if the lineup is mixed. Swap or add whatever you want; it's one line each in the `FEEDS` array.
+
+**Reads are damped on purpose.** A longform essay is scored at about a third of its natural weight unless multiple sources pick it up, so an Atlantic piece never buries a fire in Woonsocket. Toggle the category off if you want a pure breaking-news board.
+
+## Social watch
+
+One box, three input shapes:
+
+- `#wildfire` → Bluesky + Mastodon + Reddit for that tag
+- `@handle` → follows one Bluesky account (reporters, agencies, your fire department)
+- `plain words` → Bluesky keyword search + Reddit, catches posts with no hashtag at all
+
+Bluesky is the reliable one — fully open read API, no key, no relay, never fails.
+
+**X and Instagram aren't possible.** X went pay-per-use in February 2026 (roughly $0.005 per post read, no free tier, full-archive search is enterprise-only at $42k+/month). Instagram's Graph API only reads accounts you own and has no public hashtag search at all. Neither works from a static page even with your own login, because your browser won't send their cookies to your domain. For X coverage, add a Google News feed for `site:x.com` plus your terms.
+
+## Your settings stick
+
+Categories, watchwords, social watches, custom feeds, refresh interval and the chime save to `localStorage` on your own site. "Reset saved settings" clears them. If you preview the file inside a sandboxed frame, saving silently no-ops — that's expected, and it works normally once it's on Pages.
+
+## On iPhone (Safari)
+
+It works, and the layout is built for it — on a phone the controls collapse behind a **Controls** button at the top so you land on the news, not the settings panel.
+
+Three iOS-specific things:
+
+**Notifications need Home Screen.** Safari tabs can't do web notifications on iOS at all. Open the site, tap Share → **Add to Home Screen**, then open it from that icon. Now the alerts button works and you get real notifications. (`manifest.json` ships alongside `index.html` to make this work — keep both in the repo.)
+
+**Nothing runs in the background.** iOS freezes timers the moment you switch apps or lock the screen, so auto-refresh stops and no alerts arrive while it's not on screen. When you come back it detects the missed refresh and catches up immediately. This is an iOS limit no web page can get around — background alerts would need a real server pushing to you, not a static page.
+
+**Storage can expire.** Safari clears `localStorage` after about 7 days without visiting a site. Home Screen apps hold on longer, but if your setup ever resets after a long gap, that's why.
+
+Practical read: on the phone it's an excellent *check it* tool. For alerts that reach you while you're cutting hair, leave it open on a laptop or an old tablet on the counter.
+
+## It picks its own mode
+
+There's no setup per device. On load it looks at the user agent and the pointer type and decides what it's running on:
+
+- **Television** (Tizen, WebOS, Fire TV, Chromecast, Roku, consoles — or any screen 1280px+ with a pointer that can't hover, which means a remote) → display mode automatically
+- **Phone** → controls collapsed behind a Controls button, big tap targets, no zoom-on-focus
+- **Tablet / computer** → full rail
+
+The rail shows what it detected, and there's a **Switch to display mode** button to force the other one. `?tv=1` and `?tv=0` in the URL override the detection permanently, which is what the TV link button uses.
+
+There's also a watchdog: a tiny script written in old-style JavaScript runs first and checks four seconds later whether the main script ever started. If the browser was too old to even read the main script, you get a plain message saying so instead of a blank screen.
+
+## Live video
+
+Paste any YouTube live URL into **Live video** in the rail and the official YouTube player embeds right in the page. Four URL shapes work:
+
+| You paste | What happens |
+|---|---|
+| `youtube.com/watch?v=…` | plays that specific stream |
+| `youtu.be/…` | same |
+| `youtube.com/live/…` | same |
+| `youtube.com/channel/UC…` | used directly |
+| `youtube.com/@handle` | looked up, then used |
+
+**It finds the current stream address for you.** Broadcasters restart their 24/7 streams every so often, which kills the video ID and leaves you with a dead player. So whatever you paste, the page reads that YouTube page and pulls out the channel's permanent ID. From then on the embed uses YouTube's `live_stream?channel=` form, which makes YouTube look up whatever that outlet is airing *at that moment*, on every single page load. Set it once and it keeps working.
+
+If the lookup fails (relay throttled, say), it falls back to the specific stream you pasted and tells you plainly that this one will eventually go stale.
+
+Preset buttons for Sky News, DW, France 24, ABC News, NBC News and LiveNOW resolve the same way — they're stored as `@handles`, not IDs, so they can't rot. If a broadcaster ever renames their handle, paste their channel URL instead.
+
+Streams start muted, because every browser blocks autoplay with sound. Click the player to unmute.
+
+A note on the "free IPTV playlist" `.m3u8` links floating around: those are unlicensed restreams of pay channels. They break constantly and aren't worth wiring in. Everything above is a broadcaster's own player, embedded the way they intend.
+
+### Video on the TV board
+
+Add a video and `?tv=1` becomes a proper newsroom wall: stream on the left at about 63% width, the top headlines stacked down the right, and a scrolling ticker along the bottom carrying the hottest stories. Watchword hits and fast-moving stories show amber in the ticker.
+
+The **Get TV display link** button includes your video choice, so one URL sets up the whole board.
+
+## On a Samsung TV browser
+
+Yes — and there's a mode built for it. Add `?tv=1` to the URL and the page becomes a hands-off display board: controls gone, type sized for across-the-room reading, six stories per screen cycling every 18 seconds with page dots at the bottom, and a clock in the corner.
+
+Because a TV has its own empty storage and no realistic way to type settings, the board reads its config from the URL. Set everything up on your phone or laptop, hit **Get TV display link**, and it builds a URL with your categories and watchwords baked in:
+
+```
+https://you.github.io/wire/?tv=1&cats=local,wires,politics&words=fire,crash,outage
+```
+
+Type that once on the TV and it's set. Optional `&every=300` overrides the refresh interval.
+
+What to expect:
+
+- **Age matters a lot here.** Samsung's browser is Chromium, but an old one — a 2019 set might be on Chromium 63. The whole script is written without `?.` and `??` for that reason, since one unsupported character means a blank screen with no way to debug it. There's also an on-screen error banner instead of a console. Roughly 2017 and newer should run it; older than that, no promises.
+- **No notifications.** The TV browser doesn't do web notifications. TV mode is for watching, not alerting — sort order still puts hot and flagged stories on the first page, so what matters lands on screen anyway.
+- **It'll get killed eventually.** TV browsers are memory-tight and aggressive about unloading idle pages. Expect to reload it every day or two. Old items are pruned at 48 hours to keep memory flat, which helps.
+- **Burn-in.** On an OLED, don't leave a static bright page up for many hours. The cycling helps; the header doesn't move.
+- **Video in the TV browser is the shakiest part.** Tizen's YouTube iframe support is inconsistent — some sets play it fine, others stall or refuse. If yours won't cooperate, the TV's built-in YouTube app and Samsung TV Plus both carry these same channels free (Sky News and ABC News Live are on TV Plus), and they'll look far better than an embedded player. In that case run the board without video and let the TV handle the picture.
+- Links aren't clickable in TV mode — pointer events are off, since a remote can't usefully click a headline anyway.
+
+## Relays, in plain terms
+
+Your browser only reads another site's data if that site says "anyone can read this." Most news sites never turned that on — not to block you, they just never bothered. So the page asks a free middleman service to fetch the feed and hand it back. That middleman is the relay.
+
+Three consequences:
+
+1. **A `fail` is usually the relay, not the news site.** Free relays get hammered and throttle. Refresh usually clears it.
+2. **USGS, NWS, Hacker News, GDELT and Bluesky never fail** — they turned the setting on, so they're fetched direct with no middleman. That's your reliable core.
+3. **Your own relay fixes it for good.** Ten minutes, free.
+
+### Your own relay
+
+Cloudflare Workers free tier. Sign up, new Worker, paste, deploy:
+
+```js
+export default {
+  async fetch(req) {
+    const target = new URL(req.url).searchParams.get('url');
+    if (!target) return new Response('missing url', {status: 400});
+    const r = await fetch(target, {headers: {'User-Agent': 'wire-desk/1.0'}});
+    return new Response(r.body, {
+      status: r.status,
+      headers: {
+        'Content-Type': r.headers.get('Content-Type') || 'text/plain',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+}
+```
+
+Put it first in `RELAYS` near the top of the script; leave the public ones as fallback.
+
+## Adding feeds
+
+In the UI, or permanently in the `FEEDS` array:
+
+```js
+{id:'wjar', name:'NBC 10', cat:'local', kind:'rss', url:'https://turnto10.com/feed'}
+```
+
+Finding links: `thesite.com/feed` or `/rss`; any subreddit takes `.rss` on the end; YouTube channels use `youtube.com/feeds/videos.xml?channel_id=…`; anything at all via `news.google.com/rss/search?q=your+terms`.
+
+## Known rough edges
+
+- **Some feed URLs will need swapping.** RSS paths move around, especially at local TV stations and Gannett papers. The health panel tells you which ones are dead — anything showing `fail` on every refresh is a bad URL, not a busy relay.
+- **RSS runs 2–15 minutes behind.** Fine for awareness, not for anything time-critical.
+- **Clustering is word-overlap, not meaning.** It occasionally merges two stories that share a lot of proper nouns, or misses a match when outlets word a headline very differently. Tuning knobs are `j >= 0.42` and `hit >= 2` in `add()` — raise for stricter grouping, lower for looser.
+- Nothing scrapes or logs in anywhere. Public feeds and public APIs only.
+- Repo needs both `index.html` and `manifest.json` for the iOS Home Screen behaviour.
