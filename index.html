@@ -414,260 +414,96 @@ window.setTimeout(function(){
    ============================================================ */
 
 const RELAYS = [
-  {name:'allorigins', url: u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`},
-  {name:'codetabs',   url: u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`},
-  {name:'corsproxy',  url: u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`},
-  {name:'allorigins-json', url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+  {n:'allorigins',  u: x => `https://api.allorigins.win/raw?url=${encodeURIComponent(x)}`},
+  {n:'codetabs',    u: x => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(x)}`},
+  {n:'corsproxy',   u: x => `https://corsproxy.io/?url=${encodeURIComponent(x)}`},
+  {n:'cors.lol',    u: x => `https://api.cors.lol/?url=${encodeURIComponent(x)}`},
+  {n:'cors.eu',     u: x => `https://cors.eu.org/${x}`},
+  {n:'corsworkers', u: x => `https://test.cors.workers.dev/?${x}`},
+  {n:'thingproxy',  u: x => `https://thingproxy.freeboard.io/fetch/${x}`},
+  {n:'allorigins2', u: x => `https://api.allorigins.win/get?url=${encodeURIComponent(x)}`,
    unwrap: t => JSON.parse(t).contents},
-  {name:'thingproxy', url: u => `https://thingproxy.freeboard.io/fetch/${u}`}
+  {n:'whateverorigin', u: x => `https://whateverorigin.org/get?url=${encodeURIComponent(x)}`,
+   unwrap: t => JSON.parse(t).contents}
 ];
 
-/* Requests are spread across relays and throttled to a few at a time.
-   Firing thirty at once through one free proxy looks like abuse and gets
-   the whole batch rate-limited — which is what "most feeds failed" is. */
-const MAX_PARALLEL = 3;
-let relayCursor = 0, bestRelay = 0;
-const queue = {running:0, waiting:[]};
+/* Each relay gets its own small queue rather than one shared one.
+   A single global cap of three meant forty feeds crawled through a
+   three-wide door; nine relays at three apiece is up to 27 in flight
+   while still never hammering any one proxy. */
+const PER_RELAY = 3;
+RELAYS.forEach(function(r){ r.busy = 0; r.q = []; r.wins = 0; r.fails = 0; });
 
-function slot(){
-  return new Promise(function(release){
-    function start(){
-      queue.running++;
-      release(function(){
-        queue.running--;
-        const next = queue.waiting.shift();
-        if (next) next();
-      });
+function acquire(r){
+  return new Promise(function(res){
+    function go(){
+      r.busy++;
+      res(function(){ r.busy--; const next = r.q.shift(); if (next) next(); });
     }
-    if (queue.running < MAX_PARALLEL) start(); else queue.waiting.push(start);
+    if (r.busy < PER_RELAY) go(); else r.q.push(go);
   });
 }
 
-/* A hung relay must not block the queue behind it. */
+/* Prefer relays that have been working, skip ones that clearly aren't,
+   and spread the load rather than piling onto whichever answered first. */
+let spread = 0;
+function relayOrder(){
+  const live = RELAYS.filter(function(r){ return !(r.fails >= 4 && r.wins === 0); });
+  const pool = live.length ? live : RELAYS.slice();
+  const rot = spread++ % pool.length;
+  return pool.slice(rot).concat(pool.slice(0, rot)).sort(function(a, b){
+    const sa = a.wins - a.fails * 2 - a.busy;
+    const sb = b.wins - b.fails * 2 - b.busy;
+    return sb - sa;
+  });
+}
+
 function timedFetch(url, ms){
   if (!window.AbortController) return fetch(url, {cache:'no-store'});
   const ctl = new AbortController();
-  const timer = setTimeout(function(){ ctl.abort(); }, ms || 13000);
+  const timer = setTimeout(function(){ ctl.abort(); }, ms || 12000);
   return fetch(url, {cache:'no-store', signal:ctl.signal})
     .then(function(r){ clearTimeout(timer); return r; },
           function(e){ clearTimeout(timer); throw e; });
 }
-const MASTODON = 'https://mastodon.social';
 
-/* Sky News' channel ID, verified. The out-of-the-box stream, so video
-   works on first open with nothing to paste. Channel IDs never change,
-   and YouTube resolves the current live stream itself on every load. */
-const DEFAULT_VIDEO = 'c:UCoMdktPbSTixAyNGwb-UYkQ';
-const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
-
-/* Google News publishes a top-stories feed for every country and language
-   it covers. One endpoint, always valid — far safer than guessing each
-   outlet's own RSS path, especially abroad. */
-const GTOP = (hl, gl) => `https://news.google.com/rss?hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
-const GSITE = (site, hl, gl) =>
-  `https://news.google.com/rss/search?q=${encodeURIComponent('site:'+site+' when:2d')}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
-
-const FEEDS = [
-  /* ---- Rhode Island / southern New England ---- */
-  {id:'wpri',   name:'WPRI 12',            cat:'state', kind:'rss', url:'https://www.wpri.com/feed/'},
-  {id:'ricur',  name:'Rhode Island Current',cat:'state',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
-  {id:'projo',  name:'Providence Journal', cat:'state', kind:'rss', url:GN('site:providencejournal.com when:2d')},
-  {id:'pubrad', name:"The Public's Radio", cat:'state', kind:'rss', url:GN('site:thepublicsradio.org when:2d')},
-  {id:'ecori',  name:'WJAR / NBC 10',      cat:'state', kind:'rss', url:GN('site:turnto10.com when:2d')},
-  {id:'wbur',   name:'WBUR (Boston)',      cat:'state', kind:'rss', url:'https://www.wbur.org/rss/'},
-
-  /* ---- wires ---- */
-  {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
-  {id:'reuters',name:'Reuters',            cat:'wires', kind:'rss', url:GN('site:reuters.com when:1d')},
-  {id:'ap',     name:'AP',                 cat:'wires', kind:'rss', url:GN('site:apnews.com when:1d')},
-  {id:'bbc',    name:'BBC World',          cat:'wires', kind:'rss', url:'https://feeds.bbci.co.uk/news/world/rss.xml'},
-
-  /* ---- world ---- */
-  {id:'npr',    name:'NPR',                cat:'world', kind:'rss', url:'https://feeds.npr.org/1001/rss.xml'},
-  {id:'guard',  name:'Guardian World',     cat:'world', kind:'rss', url:'https://www.theguardian.com/world/rss'},
-  {id:'ajz',    name:'Al Jazeera',         cat:'world', kind:'rss', url:'https://www.aljazeera.com/xml/rss/all.xml'},
-  {id:'dw',     name:'Deutsche Welle',     cat:'world', kind:'rss', url:'https://rss.dw.com/rdf/rss-en-all'},
-  {id:'f24',    name:'France 24',          cat:'world', kind:'rss', url:'https://www.france24.com/en/rss'},
-  {id:'cbc',    name:'CBC World',          cat:'world', kind:'rss', url:'https://www.cbc.ca/webfeed/rss/rss-world'},
-  {id:'gdelt',  name:'GDELT global index', cat:'world', kind:'gdelt', query:'breaking'},
-
-  /* ---- politics & elections: deliberately spread across the spectrum ---- */
-  {id:'nprpol', name:'NPR Politics',       cat:'politics', kind:'rss', url:'https://feeds.npr.org/1014/rss.xml'},
-  {id:'hill',   name:'The Hill',           cat:'politics', kind:'rss', url:'https://thehill.com/news/feed/'},
-  {id:'politico',name:'Politico',          cat:'politics', kind:'rss', url:'https://rss.politico.com/politics-news.xml'},
-  {id:'gpol',   name:'Guardian US politics',cat:'politics',kind:'rss', url:'https://www.theguardian.com/us-news/us-politics/rss'},
-  {id:'nr',     name:'National Review',    cat:'politics', kind:'rss', url:'https://www.nationalreview.com/feed/'},
-  {id:'reason', name:'Reason',             cat:'politics', kind:'rss', url:'https://reason.com/feed/'},
-  {id:'rcp',    name:'RealClearPolitics',  cat:'politics', kind:'rss', url:'https://www.realclearpolitics.com/index.xml'},
-  {id:'elect',  name:'Elections watch',    cat:'politics', kind:'rss', url:GN('election OR "vote count" OR primary OR ballot when:1d')},
-
-  /* ---- hazards ---- */
-  {id:'usgs',   name:'USGS earthquakes',   cat:'hazard', kind:'usgs'},
-  {id:'nws',    name:'US weather alerts',  cat:'hazard', kind:'nws'},
-
-  /* ---- slow lane: things worth reading, not watching ---- */
-  {id:'hn',     name:'Hacker News',        cat:'reads', kind:'hn'},
-  {id:'atl',    name:'The Atlantic',       cat:'reads', kind:'rss', url:'https://www.theatlantic.com/feed/all/'},
-  {id:'aeon',   name:'Aeon',               cat:'reads', kind:'rss', url:'https://aeon.co/feed.rss'},
-  {id:'quanta', name:'Quanta',             cat:'reads', kind:'rss', url:'https://api.quantamagazine.org/feed/'},
-  {id:'nautil', name:'Nautilus',           cat:'reads', kind:'rss', url:'https://nautil.us/feed/'},
-  {id:'lreads', name:'Longreads',          cat:'reads', kind:'rss', url:'https://longreads.com/feed/'},
-  {id:'marg',   name:'The Marginalian',    cat:'reads', kind:'rss', url:'https://www.themarginalian.org/feed/'},
-  {id:'mit',    name:'MIT Tech Review',    cat:'reads', kind:'rss', url:'https://www.technologyreview.com/feed/'},
-  {id:'verge',  name:'The Verge',          cat:'reads', kind:'rss', url:'https://www.theverge.com/rss/index.xml'}
-];
-
-const CATS = [
-  {id:'local',   label:'Local'},
-  {id:'state',   label:'State'},
-  {id:'wires',   label:'Wires'},
-  {id:'world',   label:'World'},
-  {id:'politics',label:'Politics'},
-  {id:'hazard',  label:'Hazards'},
-  {id:'espanol', label:'Español'},
-  {id:'social',  label:'Social'},
-  {id:'reads',   label:'Reads'},
-  {id:'mine',    label:'My feeds'},
-  {id:'search',  label:'Search'}
-];
-const DEFAULT_ON = ['local','state','wires','world','politics','hazard','espanol','social','mine','search'];
-
-/* ============ persistence (silently no-ops in sandboxed frames) ============ */
-const KEY = 'wiredesk.v2';
-function save(){
-  try{
-    localStorage.setItem(KEY, JSON.stringify({
-      on:[...state.on], watches:state.watches, custom:state.custom,
-      words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
-      video:state.video, chans:state.chans, loc:state.loc
-    }));
-  }catch(e){}
-}
-function restore(){
-  try{
-    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (!s) return;
-    if (s.on) state.on = new Set(s.on);
-    if (s.watches) state.watches = s.watches;
-    if (s.custom) state.custom = s.custom;
-    if (s.words) $('#watch').value = s.words;
-    if (s.interval) $('#interval').value = s.interval;
-    if (s.sound) $('#sound').checked = true;
-    if (s.video) state.video = s.video;
-    if (s.chans) state.chans = s.chans;
-    if (s.loc) state.loc = s.loc;
-    state.restored = true;
-  }catch(e){}
-}
-
-/* ============ state ============ */
-const state = {
-  clusters: new Map(),   // id -> cluster
-  health: {},
-  watches: [],           // [{kind:'tag'|'user'|'term', v:'wildfire'}]
-  custom: [],
-  on: new Set(DEFAULT_ON),
-  query: '',
-  video: '',
-  chans: {},   // '@handle' -> 'c:UC…', cached after first lookup
-  loc: null,   // {lat, lon, city, region, zip, how}
-  forecast: [],// two always-present forecast rows
-  primed: false,         // suppress alerts on first load
-  unread: 0,
-  timer:null, tick:null, due:0, loading:false
-};
-
-/* ============ helpers ============ */
-
-/* Older Samsung/Tizen browsers predate ?. and ?? — these helpers keep the
-   whole file parseable on 2017-2020 TV firmware. A syntax error there is a
-   blank screen with no way to debug it, so it's worth the verbosity. */
-function txt(el, sel){
-  var n = el.querySelector(sel);
-  return n ? (n.textContent || '') : '';
-}
-function attr(el, sel, name){
-  var n = el.querySelector(sel);
-  return n ? (n.getAttribute(name) || '') : '';
-}
-function dig(o){
-  for (var i=1;i<arguments.length;i++){
-    if (o === null || o === undefined) return undefined;
-    o = o[arguments[i]];
-  }
-  return o;
-}
-
-const $ = s => document.querySelector(s);
-const esc = s => (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const strip = h => { const d=document.createElement('div'); d.innerHTML=h||''; return (d.textContent||'').replace(/\s+/g,' ').trim(); };
-const clip = (s,n) => s.length>n ? s.slice(0,n-1).trimEnd()+'…' : s;
-const allFeeds = () => FEEDS.concat(state.custom).concat(locFeeds());
-const HOUR = 3600e3;
-
-function age(ms){
-  const m = Math.max(0,(Date.now()-ms)/60000);
-  if (m<1) return 'now';
-  if (m<60) return Math.round(m)+'m';
-  if (m<1440) return Math.round(m/60)+'h';
-  return Math.round(m/1440)+'d';
-}
-function stripe(ms){
-  const t = Math.min(1, Math.max(0,(Date.now()-ms)/(6*HOUR)));
-  const a=[232,163,61], b=[36,51,67];
-  return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`;
-}
-const watchwords = () => $('#watch').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
-function hostOf(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return ''; } }
-
-/* Safari rejects several date shapes Chrome accepts. Try progressively
-   looser forms before giving up and calling it "now". */
-function pdate(s){
-  if (!s) return NaN;
-  s = s.trim();
-  let t = Date.parse(s);
-  if (!isNaN(t)) return t;
-  t = Date.parse(s.replace(/^[A-Za-z]{3},\s*/,'').replace(/\s+(UT|Z)$/,' GMT'));
-  if (!isNaN(t)) return t;
-  t = Date.parse(s.replace(/([+-]\d{2})(\d{2})$/,'$1:$2'));
-  if (!isNaN(t)) return t;
-  const m = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(s);
-  return m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : NaN;
-}
+/* Short-lived cache: a redraw or a second category touching the same
+   feed shouldn't cost another round trip. */
+const CACHE = new Map(), CACHE_MS = 90000;
 
 async function relayFetch(url){
-  const done = await slot();
-  try{
-    /* Some feeds send CORS headers and need no middleman at all. Trying
-       direct first costs one quick request and takes load off the relays. */
-    try{
-      const r = await timedFetch(url, 7000);
-      if (r.ok){
-        const t = await r.text();
-        if (t && t.length > 80) return t;
-      }
-    }catch(e){}
+  const hit = CACHE.get(url);
+  if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
 
-    let last;
-    const start = (bestRelay + (relayCursor++)) % RELAYS.length;
-    for (let i = 0; i < RELAYS.length; i++){
-      const idx = (start + i) % RELAYS.length;
-      const relay = RELAYS[idx];
-      try{
-        const r = await timedFetch(relay.url(url));
-        if (!r.ok) throw new Error(relay.name + ' HTTP ' + r.status);
-        let t = await r.text();
-        if (relay.unwrap) t = relay.unwrap(t);
-        if (!t || t.length < 80) throw new Error(relay.name + ' returned nothing');
-        bestRelay = idx;                       // stick with whatever just worked
-        return t;
-      }catch(e){
-        last = e;
-        relayCursor = (relayCursor + 1) % RELAYS.length;
-      }
+  /* Feeds that send CORS headers need no middleman and no queue slot. */
+  try{
+    const r = await timedFetch(url, 6000);
+    if (r.ok){
+      const t = await r.text();
+      if (t && t.length > 80){ CACHE.set(url, {t:Date.now(), v:t}); return t; }
     }
-    throw last || new Error('every relay failed');
-  } finally { done(); }
+  }catch(e){}
+
+  let last;
+  const order = relayOrder();
+  for (let i = 0; i < Math.min(4, order.length); i++){
+    const relay = order[i];
+    const release = await acquire(relay);
+    try{
+      const r = await timedFetch(relay.u(url), 12000);
+      if (!r.ok) throw new Error(relay.n + ' HTTP ' + r.status);
+      let t = await r.text();
+      if (relay.unwrap) t = relay.unwrap(t);
+      if (!t || t.length < 80) throw new Error(relay.n + ' returned nothing');
+      relay.wins++;
+      CACHE.set(url, {t:Date.now(), v:t});
+      return t;
+    }catch(e){
+      relay.fails++;
+      last = e;
+    } finally { release(); }
+  }
+  throw last || new Error('every relay failed');
 }
 
 /* ============ story clustering ============
@@ -911,8 +747,10 @@ async function loadAll(){
   state.loading = false;
   $('#prog').style.width = '0%';
   const dead = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok).length;
+  const upRelays = RELAYS.filter(function(r){ return r.wins > 0; }).length;
   $('#status').textContent = 'Updated ' + new Date().toLocaleTimeString()
-    + (dead ? ' · ' + dead + ' source' + (dead>1?'s':'') + ' failing' : '');
+    + (dead ? ' · ' + dead + ' source' + (dead>1?'s':'') + ' failing' : '')
+    + ' · ' + upRelays + '/' + RELAYS.length + ' relays up';
   fireAlerts();
   state.primed = true;
   draw();
