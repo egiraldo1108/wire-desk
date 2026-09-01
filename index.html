@@ -149,6 +149,14 @@
   .state .lead{font-family:"Newsreader",serif;font-size:21px;margin:0 0 8px}
   .state .why{color:var(--dim);font-size:13.5px;margin:0}
 
+  #pull{
+    height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
+    background:var(--panel);color:var(--dim);font-size:12.5px;
+    transition:height .18s ease;
+  }
+  #pull.armed{color:var(--lamp)}
+  #pull.spinning{height:46px!important;color:var(--lamp)}
+
   .bar{height:2px;background:var(--line);position:relative;overflow:hidden}
   .bar i{position:absolute;top:0;left:0;bottom:0;right:0;width:0;background:var(--lamp);transition:width .3s}
 
@@ -298,6 +306,8 @@ window.setTimeout(function(){
   <p style="color:#8496A8;margin:0">The page needs a browser from roughly 2017 or later. On a TV, try the
   built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
 </div>
+
+<div id="pull"><span>Pull to refresh</span></div>
 
 <div class="shell">
 
@@ -1193,6 +1203,17 @@ function fromGPS(){
       {timeout: 12000, maximumAge: 600000});
   });
 }
+/* Resolve the county name, so a town too small to make headlines still
+   has a local feed worth reading. North Smithfield rarely appears in
+   Google News; Providence County constantly does. */
+async function countyName(url){
+  try{
+    const j = await (await timedFetch(url, 8000)).json();
+    const n = dig(j, 'properties', 'name');
+    return n ? String(n).replace(/ County$/i, '') : '';
+  }catch(e){ return ''; }
+}
+
 /* NWS knows the city, county and forecast zone for any US point. */
 async function nameUSPoint(L){
   try{
@@ -1200,7 +1221,7 @@ async function nameUSPoint(L){
     const rl = dig(j, 'properties', 'relativeLocation', 'properties');
     if (rl){ L.city = L.city || rl.city; L.region = L.region || rl.state; }
     const cty = dig(j, 'properties', 'county');
-    if (cty) L.countyUrl = cty;
+    if (cty){ L.countyUrl = cty; L.county = await countyName(cty); }
     L.forecast = dig(j, 'properties', 'forecast');
     L.country = 'US';
   }catch(e){}
@@ -1214,7 +1235,7 @@ async function setLocation(L){
   /* Moving the pin has to take the old town's stories with it, or you end
      up reading the last ZIP's headlines under the new one's name. */
   if (previous && previous.city !== L.city){
-    const stale = ['loc-news','loc-state','loc-alerts'].map(function(id){
+    const stale = ['loc-news','loc-area','loc-state','loc-alerts'].map(function(id){
       const f = locFeedsFor(previous).filter(function(x){ return x.id === id; })[0];
       return f ? f.name : null;
     }).filter(Boolean);
@@ -1235,6 +1256,7 @@ async function setLocation(L){
     pull(f).then(function(){ drawSources(); drawTabs(); draw(); });
   });
   drawSources(); drawTabs(); draw();
+  saveStream();          // otherwise a reload restores the old town's stories
 }
 
 /* Feeds that only exist once we know where "here" is. */
@@ -1243,9 +1265,16 @@ function locFeedsFor(L){
   if (!L || !L.lat) return [];
   const out = [];
   if (L.city){
-    const near = '"' + L.city + '"' + (L.region ? ' OR "' + L.city + ', ' + L.region + '"' : '');
+    const near = ['"' + L.city + '"'];
+    if (L.region) near.push('"' + L.city + ', ' + L.region + '"');
+    if (L.county) near.push('"' + L.county + ' County"');
     out.push({id:'loc-news', name: L.city + ' news', cat:'local', kind:'rss',
-              url: GN(near + ' when:2d')});
+              url: GN(near.join(' OR ') + ' when:4d')});
+  }
+  /* Second, wider net so the Local tab is never empty in a small town. */
+  if (L.county && L.region){
+    out.push({id:'loc-area', name: L.county + ' County area', cat:'local', kind:'rss',
+              url: GN('"' + L.county + ' County" OR "' + (STATES[(L.region||'').toUpperCase()] || L.region) + '" when:2d')});
   }
   const st = STATES[(L.region || '').toUpperCase()];
   if (st){
@@ -2031,6 +2060,53 @@ function drawCats(){
     if (state.on.has(c)) loadAll();
   });
 }
+
+/* ============ pull to refresh ============
+   Only arms at the very top of the page, so it never fights a normal
+   scroll. Passive listeners — this must not cost scrolling smoothness. */
+(function(){
+  const el = document.getElementById('pull');
+  if (!el) return;
+  let startY = 0, tracking = false, dist = 0;
+  const label = el.querySelector('span');
+
+  document.addEventListener('touchstart', function(e){
+    if (window.scrollY > 0 || state.loading) return;
+    startY = e.touches[0].clientY;
+    tracking = true; dist = 0;
+  }, {passive:true});
+
+  document.addEventListener('touchmove', function(e){
+    if (!tracking) return;
+    dist = e.touches[0].clientY - startY;
+    if (dist <= 0 || window.scrollY > 0){ el.style.height = '0px'; el.classList.remove('armed'); return; }
+    const h = Math.min(dist * 0.5, 70);
+    el.style.height = h + 'px';
+    const ready = h >= 46;
+    el.classList.toggle('armed', ready);
+    if (label) label.textContent = ready ? 'Release to refresh' : 'Pull to refresh';
+  }, {passive:true});
+
+  document.addEventListener('touchend', function(){
+    if (!tracking) return;
+    tracking = false;
+    const h = parseInt(el.style.height, 10) || 0;
+    el.classList.remove('armed');
+    if (h >= 46){
+      el.classList.add('spinning');
+      if (label) label.textContent = 'Refreshing\u2026';
+      CACHE.clear();                       // a manual pull means "ignore the cache"
+      cycle = 0;                           // and fetch every category, not just the due ones
+      Promise.resolve(loadAll()).then(function(){
+        el.classList.remove('spinning');
+        el.style.height = '0px';
+        if (label) label.textContent = 'Pull to refresh';
+      });
+    } else {
+      el.style.height = '0px';
+    }
+  }, {passive:true});
+})();
 
 /* ============ timers ============ */
 function schedule(){
