@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wire Desk</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wire Desk">
+<meta name="theme-color" content="#0F1620">
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0F1620; --panel:#16202C; --line:#243343;
+    --text:#DCE4ED; --dim:#8496A8;
+    --lamp:#E8A33D; --flag:#D2685A; --ok:#6FB08A;
+    --gutter:82px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--ink);color:var(--text);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  button,input,select{font:inherit;color:inherit}
+  /* D-pad navigation on a TV needs a visible focus ring, and older
+     browsers don't know :focus-visible — so plain :focus is the base. */
+  a:focus,button:focus,input:focus,select:focus{outline:2px solid var(--lamp);outline-offset:2px}
+  :focus-visible{outline:2px solid var(--lamp);outline-offset:2px;border-radius:2px}
+
+  .shell{display:grid;grid-template-columns:312px 1fr;min-height:100vh}
+  .rail{border-right:1px solid var(--line);background:var(--panel);
+    padding:22px 20px 60px;position:sticky;top:0;height:100vh;overflow-y:auto}
+  .stream{padding:0 0 80px}
+
+  .brand{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+  .brand h1{font-family:"Newsreader",Georgia,serif;font-weight:500;font-size:27px;letter-spacing:-.01em;margin:0}
+  .pulse{width:9px;height:9px;border-radius:50%;background:var(--lamp);
+    box-shadow:0 0 0 0 rgba(232,163,61,.55);animation:beat 2.4s ease-out infinite;flex:none;transform:translateY(-3px)}
+  @keyframes beat{70%{box-shadow:0 0 0 9px rgba(232,163,61,0)}100%{box-shadow:0 0 0 0 rgba(232,163,61,0)}}
+  .tagline{color:var(--dim);font-size:13px;margin:0 0 22px}
+
+  .block{border-top:1px solid var(--line);padding:15px 0}
+  .block h2{font-size:13px;font-weight:600;margin:0 0 10px}
+  .hint{color:var(--dim);font-size:12px;margin:8px 0 0;line-height:1.45}
+  .hint code{color:#A6B6C6}
+
+  .field{display:flex;gap:6px}
+  input[type=text],input[type=url]{width:100%;background:var(--ink);border:1px solid var(--line);
+    border-radius:3px;padding:8px 10px;font-size:14px}
+  input::placeholder{color:#5D7186}
+  .go{background:var(--lamp);color:#151A20;border:none;border-radius:3px;
+    padding:0 13px;font-weight:600;cursor:pointer;flex:none}
+  .go:hover{background:#F2B355}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:transparent;border:1px solid var(--line);color:var(--dim);
+    border-radius:999px;padding:4px 11px;font-size:12.5px;cursor:pointer}
+  .chip[aria-pressed=true]{border-color:var(--lamp);color:var(--lamp)}
+  .chip:hover{border-color:#3A4C60}
+
+  .entry{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;border-bottom:1px dotted #1E2B3A}
+  .entry:last-child{border-bottom:none}
+  .entry .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .entry .kill{margin-left:auto;background:none;border:none;color:#5D7186;cursor:pointer;
+    font-size:16px;line-height:1;padding:2px 4px;flex:none}
+  .entry .kill:hover{color:var(--flag)}
+
+  .srcline{display:flex;align-items:center;gap:8px;padding:3.5px 0;font-size:12.5px;color:var(--dim)}
+  .dot{width:6px;height:6px;border-radius:50%;background:#3A4C60;flex:none}
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--flag)}
+  .srcline .n{margin-left:auto;font-variant-numeric:tabular-nums}
+
+  details{margin-top:10px}
+  details summary{color:var(--dim);font-size:12px;cursor:pointer;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"+ ";color:var(--lamp)}
+  details[open] summary::before{content:"– "}
+  details p{color:var(--dim);font-size:12px;line-height:1.5;margin:8px 0 0}
+
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+  select{background:var(--ink);border:1px solid var(--line);border-radius:3px;padding:6px 8px;font-size:13px}
+  .btn{background:transparent;border:1px solid var(--line);border-radius:3px;
+    padding:7px 12px;cursor:pointer;font-size:13px;width:100%}
+  .btn:hover{border-color:var(--lamp);color:var(--lamp)}
+  .btn.live{border-color:var(--ok);color:var(--ok)}
+  label.check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim);margin-top:10px;cursor:pointer}
+
+  .streamhead{display:flex;align-items:baseline;gap:14px;padding:22px 26px 14px;
+    border-bottom:1px solid var(--line);position:sticky;top:0;
+    background:linear-gradient(var(--ink) 82%,rgba(15,22,32,0));z-index:5;flex-wrap:wrap}
+  .count{font-family:"Newsreader",serif;font-size:24px;font-weight:500}
+  .streamhead .meta{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
+
+  .item{display:grid;grid-template-columns:var(--gutter) 1fr;
+    border-bottom:1px solid var(--line);padding:14px 26px 14px 0;align-items:start}
+  .item:hover{background:#131C27}
+  .age{text-align:right;padding-right:16px;color:var(--dim);font-size:12.5px;
+    font-variant-numeric:tabular-nums;padding-top:3px;position:relative}
+  .age::after{content:"";position:absolute;right:0;top:0;bottom:0;width:2px;background:var(--stripe,#243343)}
+  .head{font-family:"Newsreader",Georgia,serif;font-size:18px;line-height:1.32;max-width:66ch;display:block}
+  .item:hover .head{color:#fff}
+  .flagged .head{color:var(--flag)}
+  .flagged:hover .head{color:#E88274}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:5px}
+  .sub .src{color:#A6B6C6}
+  .pickup{color:var(--lamp);font-weight:500}
+  .fresh{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#151A20;
+    background:var(--lamp);border-radius:2px;padding:1px 5px;margin-right:7px;font-weight:600}
+  mark{background:rgba(232,163,61,.22);color:var(--lamp);padding:0 1px;border-radius:2px}
+  .reads .head{font-size:17px;color:#C6D2DE}
+
+  .state{padding:60px 26px;max-width:52ch}
+  .state .lead{font-family:"Newsreader",serif;font-size:21px;margin:0 0 8px}
+  .state .why{color:var(--dim);font-size:13.5px;margin:0}
+
+  .bar{height:2px;background:var(--line);position:relative;overflow:hidden}
+  .bar i{position:absolute;top:0;left:0;bottom:0;right:0;width:0;background:var(--lamp);transition:width .3s}
+
+  .mobilebar{display:none}
+
+  @media (max-width:820px){
+    .shell{grid-template-columns:1fr}
+    .mobilebar{
+      display:flex;align-items:center;gap:9px;
+      padding:11px 16px;background:var(--panel);
+      border-bottom:1px solid var(--line);
+      position:sticky;top:0;z-index:20;
+    }
+    .mbrand{font-family:"Newsreader",Georgia,serif;font-size:19px}
+    #railtoggle{
+      margin-left:auto;background:transparent;border:1px solid var(--line);
+      color:var(--dim);border-radius:3px;padding:6px 12px;font-size:13px;
+    }
+    #railtoggle[aria-expanded=true]{border-color:var(--lamp);color:var(--lamp)}
+    .rail{display:none;position:static;height:auto;border-right:none;
+      border-bottom:1px solid var(--line);padding-top:6px}
+    .rail.open{display:block}
+    .rail .brand,.rail .tagline{display:none}
+    .streamhead{padding:14px 16px 12px;top:47px}
+    .item{grid-template-columns:58px 1fr;padding-right:16px}
+    .age{padding-right:10px}
+    .head{font-size:17px}
+    input[type=text],input[type=url]{font-size:16px}  /* stops iOS zoom-on-focus */
+    select{font-size:16px}
+  }
+  /* ---------- live video ---------- */
+  #player{display:none;background:#000}
+  #player.on{display:block}
+  #player .frame{position:relative;width:100%;padding-top:56.25%}
+  #player iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}
+  .ticker{display:none}
+
+  /* ---------- TV mode: ?tv=1 ---------- */
+  body.tv{overflow:hidden;font-size:20px}
+  body.tv .rail,body.tv .mobilebar,body.tv .bar{display:none}
+  body.tv .shell{grid-template-columns:1fr;display:block}
+  body.tv .stream{padding:0}
+  body.tv .streamhead{
+    padding:3vh 4vw 2vh;border-bottom:2px solid var(--line);
+    background:none;position:static;
+  }
+  body.tv .count{font-size:40px;font-size:2.6vw}
+  body.tv .streamhead .meta{font-size:22px;font-size:1.3vw}
+  body.tv .tvclock{font-family:"Newsreader",Georgia,serif;font-size:40px;font-size:2.6vw;margin-left:auto}
+  body.tv .item{
+    grid-template-columns:11vw 1fr;
+    padding:2.3vh 4vw 2.3vh 0;pointer-events:none;
+  }
+  body.tv .age{font-size:26px;font-size:1.5vw;padding-right:2vw;padding-top:.5vh}
+  body.tv .head{font-size:36px;font-size:2.15vw;line-height:1.25;max-width:none}
+  body.tv .sub{font-size:22px;font-size:1.25vw;margin-top:.8vh}
+  body.tv .fresh{font-size:18px;font-size:1vw;padding:2px 8px}
+  body.tv .state{padding:12vh 6vw;max-width:none}
+  body.tv .state .lead{font-size:3vw}
+  body.tv .state .why{font-size:1.6vw}
+  /* video board: player left, headlines right, ticker along the bottom */
+  body.tv.vid{overflow:hidden}
+  body.tv.vid .stream{display:flex;flex-direction:column;height:100vh}
+  body.tv.vid .streamhead{padding:1.6vh 3vw 1.2vh;flex:none}
+  body.tv.vid #player{display:block;flex:none;width:63vw;float:left}
+  body.tv.vid #player .frame{padding-top:35.4vw}
+  body.tv.vid #list{overflow:hidden;flex:1 1 auto}
+  body.tv.vid .item{
+    grid-template-columns:6vw 1fr;padding:1.4vh 2vw 1.4vh 0;
+    width:37vw;margin-left:63vw;
+  }
+  body.tv.vid .head{font-size:24px;font-size:1.35vw}
+  body.tv.vid .sub{font-size:16px;font-size:.95vw}
+  body.tv.vid .age{font-size:18px;font-size:1vw;padding-right:1vw}
+  body.tv.vid .pager{display:none}
+  body.tv.vid .ticker{
+    display:block;flex:none;background:var(--panel);
+    border-top:2px solid var(--line);overflow:hidden;white-space:nowrap;
+    padding:1.4vh 0;font-size:24px;font-size:1.35vw;
+  }
+  body.tv.vid .tickin{display:inline-block;padding-left:100%;animation:tick 70s linear infinite}
+  body.tv.vid .tickin b{color:var(--lamp);font-weight:600}
+  body.tv.vid .tickin span{padding:0 2.5vw;color:#A6B6C6}
+  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+
+  body.tv .pager{
+    position:fixed;bottom:2.5vh;left:0;right:0;text-align:center;
+    color:#3A4C60;font-size:1.1vw;letter-spacing:.4em;
+  }
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<script>
+/* Deliberately ES5 — this must parse even where the main script cannot.
+   If the main script dies on a syntax error nothing else would ever run,
+   and you would stare at a blank screen with no way to tell why. */
+window.setTimeout(function(){
+  if (!window.__wireRan){
+    var el = document.getElementById('tooold');
+    if (el) el.style.display = 'block';
+    var sh = document.querySelector('.shell');
+    if (sh) sh.style.display = 'none';
+    var mb = document.querySelector('.mobilebar');
+    if (mb) mb.style.display = 'none';
+  }
+}, 4000);
+</script>
+<header class="mobilebar">
+  <span class="pulse"></span>
+  <span class="mbrand">Wire Desk</span>
+  <button id="railtoggle" aria-expanded="false">Controls</button>
+</header>
+
+<div id="tooold" style="display:none;padding:40px 24px;font:16px/1.5 sans-serif;color:#DCE4ED">
+  <p style="font-size:22px;margin:0 0 10px">This browser is too old to run Wire Desk.</p>
+  <p style="color:#8496A8;margin:0">The page needs a browser from roughly 2017 or later. On a TV, try the
+  built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
+</div>
+
+<div class="shell">
+
+  <aside class="rail">
+    <div class="brand"><span class="pulse"></span><h1>Wire Desk</h1></div>
+    <p class="tagline">Rhode Island, world, politics. Clustered by how many outlets are running it.</p>
+
+    <div class="block">
+      <h2>Alerts</h2>
+      <button class="btn" id="notify">Turn on desktop alerts</button>
+      <label class="check"><input type="checkbox" id="sound"> Chime on alerts</label>
+      <p class="hint">Fires when a watchword hits, or when 3+ outlets pick up the same story inside an hour.</p>
+    </div>
+
+    <div class="block">
+      <h2>Watchwords</h2>
+      <input type="text" id="watch" aria-label="Watchwords"
+             value="breaking,explosion,evacuat,earthquake,shooting,outage,emergency,recall,indict,resign,recount,shutdown,strike">
+      <p class="hint">Comma separated. These jump to the top and turn red.</p>
+    </div>
+
+    <div class="block">
+      <h2>Search the wires</h2>
+      <div class="field">
+        <input type="text" id="q" placeholder="e.g. Smithfield fire" aria-label="Search terms">
+        <button class="go" id="qgo">Run</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>Watch on social</h2>
+      <div class="field">
+        <input type="text" id="social" placeholder="#hashtag, @handle, or words" aria-label="Social watch">
+        <button class="go" id="socialadd">Add</button>
+      </div>
+      <div id="sociallist" style="margin-top:10px"></div>
+      <details>
+        <summary>What this searches</summary>
+        <p>Bluesky (open, no key, most reliable) plus Mastodon for tags, and Reddit. <code>@handle</code> follows one Bluesky account — try <code>@wpri.com</code> style handles for reporters. X and Instagram can't be read without paying; see the README.</p>
+      </details>
+    </div>
+
+    <div class="block">
+      <h2>Live video</h2>
+      <div class="field">
+        <input type="text" id="vidin" placeholder="Paste a YouTube live URL" aria-label="Live video URL">
+        <button class="go" id="vidgo">Play</button>
+      </div>
+      <div class="chips" style="margin-top:8px">
+        <button class="chip" data-vid="c:UCNye-wNBqNL5ZzHSJj3l8Bg">Al Jazeera</button>
+        <button class="chip" data-yt="@SkyNews">Sky News</button>
+        <button class="chip" data-yt="@dwnews">DW</button>
+        <button class="chip" data-yt="@FRANCE24English">France 24</button>
+        <button class="chip" data-yt="@ABCNews">ABC News</button>
+        <button class="chip" data-yt="@NBCNews">NBC News</button>
+        <button class="chip" data-yt="@LiveNOWFOX">LiveNOW</button>
+        <button class="chip" id="vidoff">Off</button>
+      </div>
+      <p class="hint" id="vidnote" style="min-height:1em"></p>
+      <details>
+        <summary>Getting a link for any channel</summary>
+        <p>Open the channel on YouTube, click its live stream, copy the address bar. Works with <code>watch?v=…</code>, <code>youtu.be/…</code>, <code>/live/…</code>, or a <code>/channel/UC…</code> URL — a channel link auto-follows whatever they're streaming right now, so it never goes stale. Free 24/7 news channels: Sky News, DW News, France 24 English, ABC News Live, CBS News, NBC News NOW, LiveNOW from FOX, Bloomberg.</p>
+      </details>
+    </div>
+
+    <div class="block">
+      <h2>Add your own feed</h2>
+      <input type="text" id="fname" placeholder="Name it" aria-label="Feed name">
+      <div class="field" style="margin-top:6px">
+        <input type="url" id="furl" placeholder="Paste RSS or Atom link" aria-label="Feed URL">
+        <button class="go" id="fadd">Add</button>
+      </div>
+      <div class="row">
+        <span class="hint" style="margin:0">File under</span>
+        <select id="fcat">
+          <option value="mine" selected>My feeds</option>
+          <option value="local">Local</option>
+          <option value="wires">Wires</option>
+          <option value="world">World</option>
+          <option value="politics">Politics</option>
+          <option value="reads">Reads</option>
+        </select>
+      </div>
+      <div id="mylist" style="margin-top:10px"></div>
+      <details>
+        <summary>Where to find feed links</summary>
+        <p>Try <code>thesite.com/feed</code> or <code>/rss</code>. Any subreddit: add <code>.rss</code> to its URL. YouTube: <code>youtube.com/feeds/videos.xml?channel_id=…</code>. Any topic at all: <code>news.google.com/rss/search?q=your+terms</code>.</p>
+      </details>
+    </div>
+
+    <div class="block">
+      <h2>Showing</h2>
+      <input type="text" id="filter" placeholder="Filter loaded headlines" aria-label="Filter headlines">
+      <div class="chips" id="cats" style="margin-top:10px"></div>
+    </div>
+
+    <div class="block">
+      <h2>Feed health</h2>
+      <div id="srcs"></div>
+      <details>
+        <summary>Why does one say "fail"?</summary>
+        <p>Your browser only reads another site's data if that site says it's OK, and most news sites never turned that on. So the page asks a free middleman — a relay — to fetch it instead. A fail is almost always the relay being busy, not the news site. Refresh usually fixes it. The README has a 10-minute setup for your own relay.</p>
+      </details>
+    </div>
+
+    <div class="block">
+      <div class="row" style="margin-top:0">
+        <span class="hint" style="margin:0">Auto-refresh</span>
+        <select id="interval">
+          <option value="0">Off</option>
+          <option value="120">Every 2 min</option>
+          <option value="300" selected>Every 5 min</option>
+          <option value="900">Every 15 min</option>
+        </select>
+      </div>
+      <button class="btn" id="reload" style="margin-top:10px">Refresh now</button>
+      <p class="hint" style="margin-top:0">Detected: <span id="devnote">—</span></p>
+      <button class="btn" id="tvswap" style="margin-top:8px">Switch to display mode</button>
+      <button class="btn" id="tvlink" style="margin-top:6px">Get TV display link</button>
+      <input type="text" id="tvout" readonly style="margin-top:6px;display:none" aria-label="TV link">
+      <button class="btn" id="wipe" style="margin-top:6px">Reset saved settings</button>
+    </div>
+  </aside>
+
+  <main class="stream">
+    <div class="streamhead">
+      <span class="count" id="count">—</span>
+      <span class="meta" id="status">Loading…</span>
+      <span class="meta" id="next" style="margin-left:auto"></span>
+    </div>
+    <div class="bar"><i id="prog"></i></div>
+    <div id="player"></div>
+    <div id="list"></div>
+    <div id="ticker" class="ticker"><div class="tickin" id="tickin"></div></div>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   Wire Desk — live event monitor, single file, no server.
+   Tuned for: Rhode Island local + world breaking + politics,
+   with slower "reads" kept in their own lane.
+
+   Core idea: headlines are grouped into stories. Six outlets
+   running the same thing in ten minutes IS the signal, so the
+   pickup count drives sort order and alerts.
+   ============================================================ */
+
+const RELAYS = [
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
+];
+const MASTODON = 'https://mastodon.social';
+const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+
+const FEEDS = [
+  /* ---- Rhode Island / southern New England ---- */
+  {id:'wpri',   name:'WPRI 12',            cat:'local', kind:'rss', url:'https://www.wpri.com/feed/'},
+  {id:'ricur',  name:'Rhode Island Current',cat:'local',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
+  {id:'projo',  name:'Providence Journal', cat:'local', kind:'rss', url:'https://www.providencejournal.com/arc/outboundfeeds/rss/category/news/?outputType=xml'},
+  {id:'pubrad', name:"The Public's Radio", cat:'local', kind:'rss', url:'https://thepublicsradio.org/feed/'},
+  {id:'ecori',  name:'ecoRI News',         cat:'local', kind:'rss', url:'https://ecori.org/feed'},
+  {id:'wbur',   name:'WBUR (Boston)',      cat:'local', kind:'rss', url:'https://www.wbur.org/rss/'},
+  {id:'gnri',   name:'RI on Google News',  cat:'local', kind:'rss', url:GN('"Rhode Island" OR Woonsocket OR "North Smithfield" OR Providence when:1d')},
+  {id:'nwsri',  name:'RI weather alerts',  cat:'local', kind:'nws', area:'RI'},
+
+  /* ---- wires ---- */
+  {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
+  {id:'reuters',name:'Reuters',            cat:'wires', kind:'rss', url:GN('site:reuters.com when:1d')},
+  {id:'ap',     name:'AP',                 cat:'wires', kind:'rss', url:GN('site:apnews.com when:1d')},
+  {id:'bbc',    name:'BBC World',          cat:'wires', kind:'rss', url:'https://feeds.bbci.co.uk/news/world/rss.xml'},
+
+  /* ---- world ---- */
+  {id:'npr',    name:'NPR',                cat:'world', kind:'rss', url:'https://feeds.npr.org/1001/rss.xml'},
+  {id:'guard',  name:'Guardian World',     cat:'world', kind:'rss', url:'https://www.theguardian.com/world/rss'},
+  {id:'ajz',    name:'Al Jazeera',         cat:'world', kind:'rss', url:'https://www.aljazeera.com/xml/rss/all.xml'},
+  {id:'dw',     name:'Deutsche Welle',     cat:'world', kind:'rss', url:'https://rss.dw.com/rdf/rss-en-all'},
+  {id:'f24',    name:'France 24',          cat:'world', kind:'rss', url:'https://www.france24.com/en/rss'},
+  {id:'cbc',    name:'CBC World',          cat:'world', kind:'rss', url:'https://www.cbc.ca/webfeed/rss/rss-world'},
+  {id:'gdelt',  name:'GDELT global index', cat:'world', kind:'gdelt', query:'breaking'},
+
+  /* ---- politics & elections: deliberately spread across the spectrum ---- */
+  {id:'nprpol', name:'NPR Politics',       cat:'politics', kind:'rss', url:'https://feeds.npr.org/1014/rss.xml'},
+  {id:'hill',   name:'The Hill',           cat:'politics', kind:'rss', url:'https://thehill.com/news/feed/'},
+  {id:'politico',name:'Politico',          cat:'politics', kind:'rss', url:'https://rss.politico.com/politics-news.xml'},
+  {id:'gpol',   name:'Guardian US politics',cat:'politics',kind:'rss', url:'https://www.theguardian.com/us-news/us-politics/rss'},
+  {id:'nr',     name:'National Review',    cat:'politics', kind:'rss', url:'https://www.nationalreview.com/feed/'},
+  {id:'reason', name:'Reason',             cat:'politics', kind:'rss', url:'https://reason.com/feed/'},
+  {id:'rcp',    name:'RealClearPolitics',  cat:'politics', kind:'rss', url:'https://www.realclearpolitics.com/index.xml'},
+  {id:'elect',  name:'Elections watch',    cat:'politics', kind:'rss', url:GN('election OR "vote count" OR primary OR ballot when:1d')},
+
+  /* ---- hazards ---- */
+  {id:'usgs',   name:'USGS earthquakes',   cat:'hazard', kind:'usgs'},
+  {id:'nws',    name:'US weather alerts',  cat:'hazard', kind:'nws'},
+
+  /* ---- slow lane: things worth reading, not watching ---- */
+  {id:'hn',     name:'Hacker News',        cat:'reads', kind:'hn'},
+  {id:'atl',    name:'The Atlantic',       cat:'reads', kind:'rss', url:'https://www.theatlantic.com/feed/all/'},
+  {id:'aeon',   name:'Aeon',               cat:'reads', kind:'rss', url:'https://aeon.co/feed.rss'},
+  {id:'quanta', name:'Quanta',             cat:'reads', kind:'rss', url:'https://api.quantamagazine.org/feed/'},
+  {id:'nautil', name:'Nautilus',           cat:'reads', kind:'rss', url:'https://nautil.us/feed/'},
+  {id:'lreads', name:'Longreads',          cat:'reads', kind:'rss', url:'https://longreads.com/feed/'},
+  {id:'marg',   name:'The Marginalian',    cat:'reads', kind:'rss', url:'https://www.themarginalian.org/feed/'},
+  {id:'mit',    name:'MIT Tech Review',    cat:'reads', kind:'rss', url:'https://www.technologyreview.com/feed/'},
+  {id:'verge',  name:'The Verge',          cat:'reads', kind:'rss', url:'https://www.theverge.com/rss/index.xml'}
+];
+
+const CATS = [
+  {id:'local',   label:'Local'},
+  {id:'wires',   label:'Wires'},
+  {id:'world',   label:'World'},
+  {id:'politics',label:'Politics'},
+  {id:'hazard',  label:'Hazards'},
+  {id:'social',  label:'Social'},
+  {id:'reads',   label:'Reads'},
+  {id:'mine',    label:'My feeds'},
+  {id:'search',  label:'Search'}
+];
+const DEFAULT_ON = ['local','wires','world','politics','hazard','social','mine','search'];
+
+/* ============ persistence (silently no-ops in sandboxed frames) ============ */
+const KEY = 'wiredesk.v2';
+function save(){
+  try{
+    localStorage.setItem(KEY, JSON.stringify({
+      on:[...state.on], watches:state.watches, custom:state.custom,
+      words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
+      video:state.video
+    }));
+  }catch(e){}
+}
+function restore(){
+  try{
+    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!s) return;
+    if (s.on) state.on = new Set(s.on);
+    if (s.watches) state.watches = s.watches;
+    if (s.custom) state.custom = s.custom;
+    if (s.words) $('#watch').value = s.words;
+    if (s.interval) $('#interval').value = s.interval;
+    if (s.sound) $('#sound').checked = true;
+    if (s.video) state.video = s.video;
+  }catch(e){}
+}
+
+/* ============ state ============ */
+const state = {
+  clusters: new Map(),   // id -> cluster
+  health: {},
+  watches: [],           // [{kind:'tag'|'user'|'term', v:'wildfire'}]
+  custom: [],
+  on: new Set(DEFAULT_ON),
+  query: '',
+  video: '',
+  primed: false,         // suppress alerts on first load
+  unread: 0,
+  timer:null, tick:null, due:0, loading:false
+};
+
+/* ============ helpers ============ */
+
+/* Older Samsung/Tizen browsers predate ?. and ?? — these helpers keep the
+   whole file parseable on 2017-2020 TV firmware. A syntax error there is a
+   blank screen with no way to debug it, so it's worth the verbosity. */
+function txt(el, sel){
+  var n = el.querySelector(sel);
+  return n ? (n.textContent || '') : '';
+}
+function attr(el, sel, name){
+  var n = el.querySelector(sel);
+  return n ? (n.getAttribute(name) || '') : '';
+}
+function dig(o){
+  for (var i=1;i<arguments.length;i++){
+    if (o === null || o === undefined) return undefined;
+    o = o[arguments[i]];
+  }
+  return o;
+}
+
+const $ = s => document.querySelector(s);
+const esc = s => (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const strip = h => { const d=document.createElement('div'); d.innerHTML=h||''; return (d.textContent||'').replace(/\s+/g,' ').trim(); };
+const clip = (s,n) => s.length>n ? s.slice(0,n-1).trimEnd()+'…' : s;
+const allFeeds = () => FEEDS.concat(state.custom);
+const HOUR = 3600e3;
+
+function age(ms){
+  const m = Math.max(0,(Date.now()-ms)/60000);
+  if (m<1) return 'now';
+  if (m<60) return Math.round(m)+'m';
+  if (m<1440) return Math.round(m/60)+'h';
+  return Math.round(m/1440)+'d';
+}
+function stripe(ms){
+  const t = Math.min(1, Math.max(0,(Date.now()-ms)/(6*HOUR)));
+  const a=[232,163,61], b=[36,51,67];
+  return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`;
+}
+const watchwords = () => $('#watch').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+function hostOf(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return ''; } }
+
+/* Safari rejects several date shapes Chrome accepts. Try progressively
+   looser forms before giving up and calling it "now". */
+function pdate(s){
+  if (!s) return NaN;
+  s = s.trim();
+  let t = Date.parse(s);
+  if (!isNaN(t)) return t;
+  t = Date.parse(s.replace(/^[A-Za-z]{3},\s*/,'').replace(/\s+(UT|Z)$/,' GMT'));
+  if (!isNaN(t)) return t;
+  t = Date.parse(s.replace(/([+-]\d{2})(\d{2})$/,'$1:$2'));
+  if (!isNaN(t)) return t;
+  const m = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(s);
+  return m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : NaN;
+}
+
+async function relayFetch(url){
+  let last;
+  for (const make of RELAYS){
+    try{
+      const r = await fetch(make(url), {cache:'no-store'});
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      const t = await r.text();
+      if (t && t.length > 80) return t;
+      throw new Error('empty body');
+    }catch(e){ last = e; }
+  }
+  throw last || new Error('all relays failed');
+}
+
+/* ============ story clustering ============
+   Two headlines belong to the same story if their significant
+   words overlap enough. That lets us count pickups: one outlet
+   is a report, five outlets in an hour is an event. */
+const STOP = new Set(('the a an of in on to for and with as at by from is are was were after over says say new '+
+  'amid its his her their you your how why what will can could would has have had but not more than about '+
+  'first last two three into out up down off between during against under while may might').split(' '));
+
+function sig(title){
+  return new Set((title||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+    .filter(w => w.length > 3 && !STOP.has(w)).slice(0,14));
+}
+function overlap(a,b){
+  let hit = 0;
+  a.forEach(x => { if (b.has(x)) hit++; });
+  return {hit, j: hit / (a.size + b.size - hit || 1)};
+}
+
+let cid = 0;
+function add(o){
+  if (!o.title) return;
+  const s = sig(o.title);
+  if (s.size < 2) return;                       // too thin to cluster safely
+
+  let best = null, bestJ = 0;
+  for (const c of state.clusters.values()){
+    if (Math.abs(c.first - o.time) > 36*HOUR) continue;
+    const {hit, j} = overlap(s, c.sig);
+    if (hit >= 2 && j >= 0.42 && j > bestJ){ best = c; bestJ = j; }
+  }
+
+  if (best){
+    if (best.sources.has(o.source)) return;     // same outlet re-listing
+    best.sources.add(o.source);
+    best.last = Math.max(best.last, o.time);
+    best.cats.add(o.cat);
+    o.sig = s;
+    if (o.time < best.first){ best.first = o.time; best.rep = o; }
+    best.sig = new Set([...best.sig, ...s].slice(0,20));
+    best.bumped = Date.now();
+  } else {
+    state.clusters.set(++cid, {
+      id: cid, rep: o, sig: s, sources: new Set([o.source]),
+      first: o.time, last: o.time, cats: new Set([o.cat]),
+      seen: false, alerted: false
+    });
+  }
+}
+
+/* drop anything older than 48h so memory stays flat */
+function prune(){
+  const cut = Date.now() - 48*HOUR;
+  for (const [k,c] of state.clusters) if (c.last < cut) state.clusters.delete(k);
+}
+
+/* ============ parsers ============ */
+function parseRSS(xml, feed){
+  const doc = new DOMParser().parseFromString(xml,'text/xml');
+  if (doc.querySelector('parsererror')) throw new Error('not a valid feed');
+  const nodes = [...doc.querySelectorAll('item, entry')];
+  if (!nodes.length) throw new Error('no items');
+  let n = 0;
+  nodes.slice(0,40).forEach(el => {
+    const title = strip(txt(el,'title'));
+    if (!title) return;
+    const link = (attr(el,'link','href') || txt(el,'link') || txt(el,'guid') || '').trim();
+    const t = pdate(txt(el,'pubDate, published, updated, date'));
+    add({title, link, time:isNaN(t)?Date.now():t, source:feed.name, cat:feed.cat});
+    n++;
+  });
+  return n;
+}
+const pullRSS = async f => parseRSS(await relayFetch(f.url), f);
+
+async function pullGDELT(feed, query){
+  const q = encodeURIComponent(query || feed.query || 'breaking');
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artlist&maxrecords=40&sort=datedesc&format=json`;
+  let j;
+  try{ j = await (await fetch(url,{cache:'no-store'})).json(); }
+  catch(e){ j = JSON.parse(await relayFetch(url)); }
+  const arts = j.articles || [];
+  arts.forEach(a => {
+    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(a.seendate||'');
+    const t = m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]) : Date.now();
+    add({title:strip(a.title), link:a.url, time:t,
+         source: query ? 'Search · GDELT' : 'GDELT '+(a.domain||''),
+         cat: query ? 'search' : feed.cat});
+  });
+  return arts.length;
+}
+
+async function pullUSGS(feed){
+  const j = await (await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',{cache:'no-store'})).json();
+  (j.features||[]).forEach(f=>{
+    const p=f.properties;
+    add({title:'M'+(p.mag===null||p.mag===undefined?'?':p.mag)+' earthquake — '+(p.place||'location pending'),
+         link:p.url, time:p.time, source:'USGS', cat:feed.cat});
+  });
+  return (j.features||[]).length;
+}
+
+async function pullNWS(feed){
+  const url = 'https://api.weather.gov/alerts/active?limit=40' + (feed.area ? '&area='+feed.area : '');
+  const j = await (await fetch(url,{cache:'no-store',headers:{'Accept':'application/geo+json'}})).json();
+  (j.features||[]).forEach(f=>{
+    const p=f.properties;
+    add({title:`${p.event} — ${(p.areaDesc||'').split(';')[0]}`,
+         link:'https://alerts.weather.gov/', time:pdate(p.sent)||Date.now(),
+         source:feed.name, cat:feed.cat});
+  });
+  return (j.features||[]).length;
+}
+
+async function pullHN(feed){
+  const j = await (await fetch('https://hn.algolia.com/api/v1/search?tags=front_page',{cache:'no-store'})).json();
+  (j.hits||[]).forEach(h=>{
+    add({title:h.title, link:h.url||`https://news.ycombinator.com/item?id=${h.objectID}`,
+         time:pdate(h.created_at)||Date.now(), source:'Hacker News', cat:feed.cat});
+  });
+  return (j.hits||[]).length;
+}
+
+/* ============ social ============ */
+async function bskySearch(term, label){
+  const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(term)}&limit=25&sort=latest`;
+  const j = await (await fetch(url,{cache:'no-store'})).json();
+  const posts = j.posts||[];
+  posts.forEach(p=>{
+    const body = strip(dig(p,'record','text')||''); if (!body) return;
+    add({title:clip(body,200),
+         link:'https://bsky.app/profile/'+dig(p,'author','handle')+'/post/'+(p.uri||'').split('/').pop(),
+         time:pdate(dig(p,'record','createdAt')||p.indexedAt)||Date.now(),
+         source:label+' · @'+(dig(p,'author','handle')||''), cat:'social'});
+  });
+  return posts.length;
+}
+async function bskyAuthor(handle){
+  const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=25`;
+  const j = await (await fetch(url,{cache:'no-store'})).json();
+  const feed = j.feed||[];
+  feed.forEach(f=>{
+    const p=f.post, body=strip(dig(p,'record','text')||''); if (!body) return;
+    add({title:clip(body,200),
+         link:'https://bsky.app/profile/'+dig(p,'author','handle')+'/post/'+(p.uri||'').split('/').pop(),
+         time:pdate(dig(p,'record','createdAt')||p.indexedAt)||Date.now(),
+         source:'@'+handle+' · Bluesky', cat:'social'});
+  });
+  return feed.length;
+}
+async function mastoTag(tag){
+  const url = `${MASTODON}/api/v1/timelines/tag/${encodeURIComponent(tag)}?limit=25`;
+  let arr;
+  try{ arr = await (await fetch(url,{cache:'no-store'})).json(); }
+  catch(e){ arr = JSON.parse(await relayFetch(url)); }
+  if (!Array.isArray(arr)) throw new Error('bad response');
+  arr.forEach(s=>{
+    const body = strip(s.content); if (!body) return;
+    add({title:clip(body,200), link:s.url, time:pdate(s.created_at)||Date.now(),
+         source:'#'+tag+' · Mastodon @'+(dig(s,'account','acct')||''), cat:'social'});
+  });
+  return arr.length;
+}
+const redditSearch = async term =>
+  parseRSS(await relayFetch(`https://www.reddit.com/search.rss?q=${encodeURIComponent(term)}&sort=new&t=day`),
+           {name:`"${term}" · Reddit`, cat:'social'});
+
+async function pullWatch(w){
+  const jobs = [];
+  if (w.kind === 'user') jobs.push(bskyAuthor(w.v.replace(/^@/,'')));
+  if (w.kind === 'tag'){ jobs.push(bskySearch('#'+w.v, '#'+w.v+' · Bluesky'), mastoTag(w.v), redditSearch(w.v)); }
+  if (w.kind === 'term'){ jobs.push(bskySearch(w.v, `"${w.v}" · Bluesky`), redditSearch(w.v)); }
+  let n=0, wins=0;
+  for (const p of jobs){ try{ n += (await p)||0; wins++; }catch(e){} }
+  state.health['w:'+w.v] = {ok: wins>0, n};
+}
+
+/* ============ orchestration ============ */
+async function pull(feed){
+  try{
+    let n=0;
+    if (feed.kind==='rss')   n = await pullRSS(feed);
+    if (feed.kind==='gdelt') n = await pullGDELT(feed);
+    if (feed.kind==='usgs')  n = await pullUSGS(feed);
+    if (feed.kind==='nws')   n = await pullNWS(feed);
+    if (feed.kind==='hn')    n = await pullHN(feed);
+    state.health[feed.id] = {ok:true, n};
+  }catch(e){
+    state.health[feed.id] = {ok:false, n:0, err:String(e.message||e)};
+  }
+}
+
+async function searchWires(q){
+  try{ parseRSS(await relayFetch(GN(q+' when:2d')), {name:'Search · Google News', cat:'search'});
+       state.health.nsearch={ok:true}; }
+  catch(e){ state.health.nsearch={ok:false}; }
+}
+
+async function loadAll(){
+  if (state.loading) return;
+  state.loading = true;
+  $('#status').textContent = 'Fetching…';
+
+  const jobs = allFeeds().filter(f => state.on.has(f.cat));
+  const watches = state.on.has('social') ? state.watches : [];
+  const total = jobs.length + watches.length + (state.query?2:0) || 1;
+
+  let done = 0;
+  const step = () => { $('#prog').style.width = Math.round(done/total*100)+'%'; drawSources(); draw(); };
+
+  const runs = jobs.map(f => pull(f).then(()=>{ done++; step(); }));
+  watches.forEach(w => runs.push(pullWatch(w).then(()=>{ done++; step(); })));
+  if (state.query){
+    runs.push(searchWires(state.query).finally(()=>{ done++; step(); }));
+    runs.push(pullGDELT({cat:'search'}, state.query).catch(()=>{}).finally(()=>{ done++; step(); }));
+  }
+
+  await Promise.all(runs);
+  prune();
+  state.loading = false;
+  $('#prog').style.width = '0%';
+  $('#status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  fireAlerts();
+  state.primed = true;
+  draw();
+}
+
+/* ============ alerts ============ */
+/* iOS will not let a page make sound until the user has tapped it,
+   so the audio context is created and resumed on first interaction. */
+let AC = null;
+function unlockAudio(){
+  try{
+    if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
+    if (AC.state === 'suspended') AC.resume();
+  }catch(e){}
+}
+['touchend','click','keydown'].forEach(ev =>
+  document.addEventListener(ev, unlockAudio, {once:false, passive:true}));
+
+function beep(){
+  if (!$('#sound').checked || !AC) return;
+  try{
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.connect(g); g.connect(AC.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.07, AC.currentTime+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime+0.18);
+    o.start(); o.stop(AC.currentTime + 0.2);
+  }catch(e){}
+}
+function hot(c){ return c.sources.size >= 3 && (Date.now() - c.first) < HOUR; }
+function flagged(c){ const w = watchwords(); const t = c.rep.title.toLowerCase(); return w.some(x => t.includes(x)); }
+
+function fireAlerts(){
+  if (!state.primed) return;
+  const fresh = [...state.clusters.values()].filter(c => !c.alerted && (hot(c) || (flagged(c) && Date.now()-c.first < 2*HOUR)));
+  fresh.forEach(c => c.alerted = true);
+  if (!fresh.length) return;
+  state.unread += fresh.length;
+  document.title = `(${state.unread}) Wire Desk`;
+  beep();
+  if (window.Notification && Notification.permission === 'granted'){
+    const c = fresh[0];
+    new Notification(fresh.length>1 ? `${fresh.length} new alerts` : (hot(c)?'Picking up fast':'Watchword hit'), {
+      body: clip(c.rep.title,120) + (c.sources.size>1 ? ` — ${c.sources.size} outlets` : ''),
+      tag: 'wiredesk'
+    });
+  }
+}
+window.addEventListener('focus', () => { state.unread = 0; document.title = 'Wire Desk'; });
+
+/* ============ TV display mode ============
+   ?tv=1 turns the page into a hands-off board: no controls, big type,
+   pages of stories cycling on a timer. Settings ride in the URL because
+   a TV has its own empty localStorage and no practical way to type. */
+const PARAMS = (function(){
+  const o = {};
+  (location.search.replace(/^\?/,'') + '&' + location.hash.replace(/^#/,''))
+    .split('&').forEach(function(kv){
+      const i = kv.indexOf('=');
+      if (i > 0) o[decodeURIComponent(kv.slice(0,i))] = decodeURIComponent(kv.slice(i+1));
+      else if (kv) o[decodeURIComponent(kv)] = '1';
+    });
+  return o;
+})();
+/* ---- what kind of screen is this? ----
+   Wire Desk runs on a phone, a laptop and a TV, and each wants a
+   different shape. This picks one automatically; ?tv=1 and ?tv=0
+   override it either way. */
+function detectDevice(){
+  const ua = navigator.userAgent || '';
+  const mq = q => !!(window.matchMedia && window.matchMedia(q).matches);
+
+  if (/Tizen|SMART-TV|SmartTV|Smart-TV|WebOS|Web0S|hbbtv|HbbTV|NetCast|BRAVIA|AFT[A-Z]|GoogleTV|CrKey|VIDAA|Roku|AppleTV|PlayStation|Xbox/i.test(ua))
+    return 'tv';
+
+  /* A pointer that can't hover, on a screen far too big for a tablet,
+     is a remote control aimed at a television. */
+  if (mq('(hover:none)') && mq('(pointer:coarse)') && screen.width >= 1280 && !('ontouchstart' in window))
+    return 'tv';
+
+  if (/iPhone|iPod|Android.*Mobile|Windows Phone/i.test(ua)) return 'phone';
+  if (/iPad|Tablet|Silk|Android/i.test(ua)) return 'tablet';
+  if (Math.min(screen.width, screen.height) < 500) return 'phone';
+  return 'desktop';
+}
+const DEVICE = detectDevice();
+const TV = PARAMS.tv === '0' ? false : (PARAMS.tv ? true : DEVICE === 'tv');
+const TV_DWELL = 18000;
+const perPage = () => state.video ? 4 : 6;
+let tvPage = 0;
+
+function tvLink(){
+  const base = location.href.split('?')[0].split('#')[0];
+  return base + '?tv=1&cats=' + encodeURIComponent([...state.on].join(','))
+              + '&words=' + encodeURIComponent($('#watch').value)
+              + (state.video ? '&video=' + encodeURIComponent(state.video) : '');
+}
+function drawTV(rows){
+  const clock = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  $('#next').textContent = '';
+  const head = $('.streamhead');
+  if (!head.querySelector('.tvclock'))
+    head.insertAdjacentHTML('beforeend', '<span class="tvclock"></span>');
+  head.querySelector('.tvclock').textContent = clock;
+
+  const per = perPage();
+  const pages = Math.max(1, Math.ceil(Math.min(rows.length,60) / per));
+  if (tvPage >= pages) tvPage = 0;
+  const slice = rows.slice(tvPage*per, tvPage*per + per);
+
+  $('#list').innerHTML = slice.map(function(c){
+    const n = c.sources.size;
+    const others = [...c.sources].slice(0,2).join(', ');
+    return '<div class="item ' + (flagged(c)?'flagged':'') + '">' +
+      '<span class="age" style="--stripe:' + stripe(c.last) + '">' + age(c.first) + '</span>' +
+      '<span><span class="head">' + (hot(c)?'<span class="fresh">picking up</span>':'') + esc(c.rep.title) + '</span>' +
+      '<span class="sub">' + (n>1
+        ? '<span class="pickup">' + n + ' outlets</span> · ' + esc(others)
+        : '<span class="src">' + esc(c.rep.source) + '</span>') + '</span></span></div>';
+  }).join('') +
+  '<div class="pager">' + Array.from({length:pages}, function(_,i){
+    return i===tvPage ? '\u25CF' : '\u25CB'; }).join(' ') + '</div>';
+}
+
+/* ============ live video ============
+   Official broadcaster livestreams via YouTube's own embed player.
+   Two URL shapes are supported: a specific video, or a channel — the
+   channel form auto-follows whatever that outlet is streaming right
+   now, so it never goes stale.
+
+   Note: "free IPTV playlist" .m3u8 links circulating online are
+   unlicensed restreams. They die constantly and aren't worth wiring in. */
+/* Resolve any YouTube page to its permanent channel ID by reading the
+   page's own markup. That matters because broadcasters restart their
+   24/7 streams regularly — a video ID goes dead, a channel ID never
+   does. Once we have the channel, YouTube itself looks up the current
+   live stream on every single page load. */
+async function resolveChannel(url){
+  const html = await relayFetch(url);
+  let m = /"channelId":"(UC[\w-]{20,})"/.exec(html);
+  if (!m) m = /channel\/(UC[\w-]{20,})/.exec(html);
+  if (!m) m = /"externalId":"(UC[\w-]{20,})"/.exec(html);
+  return m ? 'c:' + m[1] : '';
+}
+
+function parseVideo(input){
+  if (!input) return '';
+  input = input.trim();
+  if (/^c:UC[\w-]+$/.test(input) || /^[\w-]{11}$/.test(input)) return input;
+  let m = /[?&]v=([\w-]{11})/.exec(input);            if (m) return m[1];
+  m = /youtu\.be\/([\w-]{11})/.exec(input);          if (m) return m[1];
+  m = /\/live\/([\w-]{11})/.exec(input);             if (m) return m[1];
+  m = /\/embed\/([\w-]{11})/.exec(input);            if (m) return m[1];
+  m = /\/channel\/(UC[\w-]+)/.exec(input);           if (m) return 'c:' + m[1];
+  return '';
+}
+function videoSrc(v){
+  const common = 'autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1';
+  return v.indexOf('c:') === 0
+    ? 'https://www.youtube.com/embed/live_stream?channel=' + v.slice(2) + '&' + common
+    : 'https://www.youtube.com/embed/' + v + '?' + common;
+}
+function setVideo(v){
+  state.video = v;
+  const box = $('#player');
+  if (!v){
+    box.className = ''; box.innerHTML = '';
+    document.body.classList.remove('vid');
+    save(); draw(); return;
+  }
+  box.className = 'on';
+  box.innerHTML = '<div class="frame"><iframe src="' + videoSrc(v) + '" '
+    + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
+    + 'title="Live news stream"></iframe></div>';
+  if (TV) document.body.classList.add('vid');
+  save(); draw();
+}
+function drawTicker(rows){
+  const bits = rows.slice(0,14).map(function(c){
+    const n = c.sources.size;
+    return '<span>' + (flagged(c) || hot(c) ? '<b>' + esc(c.rep.title) + '</b>' : esc(c.rep.title))
+      + (n>1 ? '  \u00B7 ' + n + ' outlets' : '') + '</span>';
+  }).join('');
+  $('#tickin').innerHTML = bits + bits;   // doubled so the loop reads seamlessly
+}
+
+/* ============ rendering ============ */
+function score(c){
+  const hrs = (Date.now() - c.last)/HOUR;
+  let s = 100/(1+hrs);                         // recency
+  s += Math.min(c.sources.size,8) * 14;        // pickup weight
+  if (flagged(c)) s += 400;
+  if (hot(c)) s += 200;
+  if (c.cats.has('reads') && c.sources.size<2) s *= 0.35;   // reads never shout
+  return s;
+}
+function visible(){
+  const f = $('#filter').value.trim().toLowerCase();
+  let out = [...state.clusters.values()].filter(c => [...c.cats].some(x => state.on.has(x)));
+  if (f) out = out.filter(c => (c.rep.title+' '+[...c.sources].join(' ')).toLowerCase().includes(f));
+  return out.sort((a,b) => score(b) - score(a)).slice(0,250);
+}
+function highlight(t, terms){
+  let h = esc(t);
+  terms.filter(x=>x.length>2).forEach(x=>{
+    h = h.replace(new RegExp('('+x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>');
+  });
+  return h;
+}
+
+function draw(){
+  const rows = visible();
+  const terms = [$('#filter').value.trim(), ...watchwords()].filter(Boolean);
+  $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : '—';
+
+  if (TV && rows.length){
+    if (state.video) drawTicker(rows);
+    drawTV(rows);
+    return;
+  }
+
+  if (!rows.length){
+    const dead = Object.values(state.health).filter(h=>!h.ok).length;
+    $('#list').innerHTML = `<div class="state">
+      <p class="lead">${state.loading?'Still pulling feeds.':'Nothing in the stream yet.'}</p>
+      <p class="why">${ state.loading ? 'First load takes a few seconds while each source answers.'
+        : dead ? `${dead} source${dead>1?'s':''} came back empty — usually the free relays throttling. Hit Refresh, or set up your own relay (README).`
+        : 'Turn on a category, or widen the filter.'}</p></div>`;
+    return;
+  }
+
+  $('#list').innerHTML = rows.map(c => {
+    const n = c.sources.size;
+    const isFlag = flagged(c);
+    const readOnly = c.cats.has('reads') && n < 2;
+    const others = [...c.sources].slice(0,3).join(', ');
+    return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
+      <span class="age" style="--stripe:${stripe(c.last)}">${age(c.first)}</span>
+      <span>
+        <span class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</span>
+        <span class="sub">${ n>1
+            ? `<span class="pickup">${n} outlets</span> · ${esc(others)}${n>3?' +'+(n-3):''}`
+            : `<span class="src">${esc(c.rep.source)}</span>${hostOf(c.rep.link)?' · '+esc(hostOf(c.rep.link)):''}` }</span>
+      </span></a>`;
+  }).join('');
+}
+
+function drawSources(){
+  const lines = allFeeds().filter(f=>state.on.has(f.cat)).map(f=>{
+    const h = state.health[f.id];
+    const cls = !h?'':h.ok?'ok':'bad';
+    return `<div class="srcline" title="${h&&h.err?esc(h.err):''}"><span class="dot ${cls}"></span>${esc(f.name)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`;
+  });
+  if (state.on.has('social')) state.watches.forEach(w=>{
+    const h = state.health['w:'+w.v];
+    const cls = !h?'':h.ok?'ok':'bad';
+    const tag = w.kind==='tag'?'#':w.kind==='user'?'@':'';
+    lines.push(`<div class="srcline"><span class="dot ${cls}"></span>${tag}${esc(w.v)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`);
+  });
+  $('#srcs').innerHTML = lines.join('') || '<p class="hint" style="margin:0">Nothing selected.</p>';
+}
+
+function drawWatches(){
+  $('#sociallist').innerHTML = state.watches.length
+    ? state.watches.map(w=>{
+        const tag = w.kind==='tag'?'#':w.kind==='user'?'@':'';
+        return `<div class="entry"><span class="label">${tag}${esc(w.v)}</span>
+          <button class="kill" data-v="${esc(w.v)}" aria-label="Remove">×</button></div>`;
+      }).join('')
+    : '<p class="hint" style="margin:0">Nothing watched yet.</p>';
+  $('#sociallist').querySelectorAll('.kill').forEach(b => b.onclick = () => {
+    state.watches = state.watches.filter(x => x.v !== b.dataset.v);
+    delete state.health['w:'+b.dataset.v];
+    drawWatches(); drawSources(); save();
+  });
+}
+function drawMine(){
+  $('#mylist').innerHTML = state.custom.length
+    ? state.custom.map(f=>`<div class="entry"><span class="label">${esc(f.name)}</span>
+        <button class="kill" data-f="${esc(f.id)}" aria-label="Remove">×</button></div>`).join('')
+    : '<p class="hint" style="margin:0">None yet.</p>';
+  $('#mylist').querySelectorAll('.kill').forEach(b => b.onclick = () => {
+    state.custom = state.custom.filter(x=>x.id!==b.dataset.f);
+    delete state.health[b.dataset.f];
+    drawMine(); drawSources(); save();
+  });
+}
+function drawCats(){
+  $('#cats').innerHTML = CATS.map(c=>`<button class="chip" data-c="${c.id}" aria-pressed="${state.on.has(c.id)}">${c.label}</button>`).join('');
+  $('#cats').querySelectorAll('.chip').forEach(b => b.onclick = () => {
+    const c = b.dataset.c;
+    state.on.has(c) ? state.on.delete(c) : state.on.add(c);
+    b.setAttribute('aria-pressed', state.on.has(c));
+    drawSources(); draw(); save();
+    if (state.on.has(c)) loadAll();
+  });
+}
+
+/* ============ timers ============ */
+function schedule(){
+  clearInterval(state.timer); clearInterval(state.tick);
+  const secs = +$('#interval').value;
+  if (!secs){ $('#next').textContent=''; return; }
+  state.due = Date.now()+secs*1000;
+  state.timer = setInterval(()=>{ state.due = Date.now()+secs*1000; loadAll(); }, secs*1000);
+  state.tick = setInterval(()=>{
+    const s = Math.max(0,Math.round((state.due-Date.now())/1000));
+    $('#next').textContent = `next pull in ${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  },1000);
+}
+
+/* ============ wiring ============ */
+$('#notify').onclick = async () => {
+  if (!window.Notification){
+    $('#notify').textContent = 'Add to Home Screen first (iOS)';
+    $('#notify').insertAdjacentHTML('afterend',
+      '<p class="hint">On iPhone, alerts only work once the page is saved to your Home Screen: Share \u2192 Add to Home Screen, then open it from the icon.</p>');
+    return;
+  }
+  const p = await Notification.requestPermission();
+  $('#notify').textContent = p==='granted' ? 'Desktop alerts on' : 'Alerts blocked — check browser settings';
+  if (p==='granted') $('#notify').classList.add('live');
+};
+$('#sound').onchange = save;
+
+$('#qgo').onclick = () => {
+  state.query = $('#q').value.trim();
+  if (!state.query) return;
+  state.on.add('search'); drawCats(); loadAll();
+};
+$('#q').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#qgo').click(); });
+
+$('#socialadd').onclick = () => {
+  const raw = $('#social').value.trim();
+  if (!raw) return;
+  let w;
+  if (raw.startsWith('#'))      w = {kind:'tag',  v: raw.slice(1).replace(/\s+/g,'')};
+  else if (raw.startsWith('@')) w = {kind:'user', v: raw.slice(1).replace(/\s+/g,'')};
+  else                          w = {kind:'term', v: raw};
+  if (!state.watches.some(x=>x.v===w.v)) state.watches.push(w);
+  $('#social').value = '';
+  state.on.add('social'); drawCats(); drawWatches(); drawSources(); save();
+  pullWatch(w).then(()=>{ drawSources(); draw(); });
+};
+$('#social').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#socialadd').click(); });
+
+$('#fadd').onclick = () => {
+  const url = $('#furl').value.trim();
+  if (!/^https?:\/\//i.test(url)){ $('#furl').value=''; $('#furl').placeholder='Must start with https://'; return; }
+  const feed = {id:'c'+Date.now(), name:$('#fname').value.trim()||hostOf(url)||'Custom feed',
+                cat:$('#fcat').value, kind:'rss', url};
+  state.custom.push(feed);
+  $('#furl').value=''; $('#fname').value=''; $('#furl').placeholder='Paste RSS or Atom link';
+  state.on.add(feed.cat); drawCats(); drawMine(); drawSources(); save();
+  pull(feed).then(()=>{ drawSources(); draw(); });
+};
+$('#furl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#fadd').click(); });
+
+/* Takes anything YouTube-shaped — a stream, a channel, an @handle —
+   and always tries to end up holding a channel ID. */
+async function acceptVideo(input, label){
+  const raw = (input||'').trim();
+  if (!raw) return;
+  const note = $('#vidnote');
+  note.textContent = 'Finding the channel…';
+
+  const parsed = parseVideo(raw);
+  if (parsed.indexOf('c:') === 0){ note.textContent = ''; setVideo(parsed); return; }
+
+  /* an @handle, /c/ or /user/ URL has no ID in it — read the page for one */
+  const looksLikeChannelPage = /youtube\.com\/(@|c\/|user\/)/i.test(raw);
+  const lookupUrl = looksLikeChannelPage ? raw
+                  : (parsed ? 'https://www.youtube.com/watch?v=' + parsed : '');
+
+  if (!lookupUrl){
+    note.textContent = "That doesn't look like a YouTube link.";
+    return;
+  }
+  try{
+    const ch = await resolveChannel(lookupUrl);
+    if (ch){
+      note.textContent = (label || 'Channel') + ' locked in — it will follow their live stream from now on.';
+      setVideo(ch);
+      return;
+    }
+    throw new Error('no id');
+  }catch(e){
+    if (parsed){
+      note.textContent = 'Using that one stream. It will stop working when they restart it — paste their channel link instead for a permanent one.';
+      setVideo(parsed);
+    } else {
+      note.textContent = "Couldn't read that channel. Try their /channel/UC… link.";
+    }
+  }
+}
+
+$('#vidgo').onclick = () => {
+  const val = $('#vidin').value;
+  $('#vidin').value = '';
+  acceptVideo(val);
+};
+$('#vidin').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#vidgo').click(); });
+$('#vidoff').onclick = () => setVideo('');
+document.querySelectorAll('[data-vid]').forEach(b => b.onclick = () => setVideo(b.dataset.vid));
+document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-yt],[data-vid]').forEach(x => x.setAttribute('aria-pressed','false'));
+  b.setAttribute('aria-pressed','true');
+  acceptVideo('https://www.youtube.com/' + b.dataset.yt, b.textContent);
+});
+
+$('#filter').addEventListener('input', draw);
+$('#watch').addEventListener('input', ()=>{ draw(); save(); });
+$('#reload').onclick = ()=>{ loadAll(); schedule(); };
+$('#interval').onchange = ()=>{ schedule(); save(); };
+$('#tvlink').onclick = ()=>{
+  const o = $('#tvout');
+  o.style.display = 'block'; o.value = tvLink(); o.select();
+  try{ document.execCommand('copy'); $('#tvlink').textContent = 'Copied — open it on the TV'; }
+  catch(e){ $('#tvlink').textContent = 'Copy this link to the TV'; }
+};
+$('#tvswap').onclick = ()=>{
+  const base = location.href.split('?')[0].split('#')[0];
+  location.href = base + '?tv=' + (TV ? '0' : '1');
+};
+if (TV) $('#tvswap') && ($('#tvswap').textContent = 'Switch to full controls');
+
+$('#wipe').onclick = ()=>{ try{ localStorage.removeItem(KEY); }catch(e){} location.reload(); };
+
+$('#railtoggle').onclick = () => {
+  const r = $('.rail'), open = r.classList.toggle('open');
+  $('#railtoggle').setAttribute('aria-expanded', open);
+  if (!open) window.scrollTo({top:0});
+};
+
+/* iOS Safari freezes timers in background tabs, so catch up on return. */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - state.due > 0) loadAll();
+});
+
+/* No devtools on a television, so surface fatal errors on screen. */
+window.onerror = function(msg, src, line){
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#D2685A;'
+    + 'color:#141A20;padding:10px 14px;font:14px/1.3 sans-serif';
+  b.textContent = 'Script error: ' + msg + ' (line ' + line + ')';
+  document.body.appendChild(b);
+};
+
+restore();
+document.body.classList.add('dev-' + DEVICE);
+$('#devnote').textContent = ({tv:'Television', phone:'Phone', tablet:'Tablet', desktop:'Computer'})[DEVICE]
+  + (TV ? ' · display mode' : ' · full controls');
+
+if (TV){
+  document.body.classList.add('tv');
+  if (PARAMS.cats)  state.on = new Set(PARAMS.cats.split(',').filter(Boolean));
+  if (PARAMS.words) $('#watch').value = PARAMS.words;
+  if (PARAMS.every) $('#interval').value = PARAMS.every;
+  if (PARAMS.video) state.video = PARAMS.video;
+  setInterval(function(){ tvPage++; draw(); }, TV_DWELL);
+  if (state.video) setVideo(state.video);
+  setInterval(draw, 30000);
+}
+
+if (window.Notification && Notification.permission === 'granted'){
+  $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
+}
+drawCats(); drawWatches(); drawMine(); drawSources();
+if (state.video && !TV) setVideo(state.video);
+loadAll(); schedule();
+setInterval(draw, 60000);
+window.__wireRan = true;
+</script>
+</body>
+</html>
