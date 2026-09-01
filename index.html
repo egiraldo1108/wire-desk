@@ -152,6 +152,7 @@
   /* ---------- live video ---------- */
   #player{display:none;background:#000}
   #player.on{display:block;position:sticky;top:0;z-index:9}
+  #player.on.unpinned{position:static}
   #player .frame{position:relative;width:100%;
     padding-top:56.25%;              /* fallback for older browsers */
     padding-top:min(56.25%,34vh);    /* keep it from eating the screen */
@@ -638,7 +639,8 @@ function save(){
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
-      playing:state.playing, liveIds:state.liveIds, videoName:state.videoName
+      playing:state.playing, liveIds:state.liveIds, videoName:state.videoName,
+      pinned:state.pinned
     }));
   }catch(e){}
 }
@@ -657,6 +659,7 @@ function restore(){
     if (s.loc) state.loc = s.loc;
     if (s.myRelay){ state.myRelay = s.myRelay; $('#myrelay').value = s.myRelay; }
     if (s.playing) state.playing = true;
+    if (s.pinned === false) state.pinned = false;
     if (s.liveIds) state.liveIds = s.liveIds;
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
@@ -676,6 +679,7 @@ const state = {
   loc: null,             // {lat, lon, city, region, zip, how}
   myRelay: '',           // user-hosted proxy, tried before all others
   playing: false,        // video only loads once you press play
+  pinned: true,          // sticky player, toggled from the bar
   videoName: '',
   liveIds: {},           // channel -> last resolved live video id
   restoredY: 0,
@@ -1396,17 +1400,30 @@ function setVideo(v, name){
     ? 'https://www.youtube.com/channel/' + v.slice(2) + '/live'
     : 'https://www.youtube.com/watch?v=' + v;
 
-  const bar = function(src){
+  const bar = function(){
     return '<div class="pbar"><span>' + esc(state.videoName || 'Live') + '</span>'
       + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
+      + '<button id="ppin">' + (state.pinned ? 'Unpin' : 'Pin') + '</button>'
+      + '<button id="pnext">Next \u203A</button>'
       + '<button id="pstop">Stop</button></div>';
   };
   const mount = function(src){
-    box.innerHTML = bar(src) + '<div class="frame"><iframe src="' + src + '" '
+    box.innerHTML = bar() + '<div class="frame"><iframe src="' + src + '" '
       + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
       + 'title="Live news stream"></iframe></div>';
     const st = document.getElementById('pstop');
     if (st) st.onclick = function(e){ e.preventDefault(); state.playing = false; save(); setVideo(v); };
+    const pin = document.getElementById('ppin');
+    if (pin) pin.onclick = function(e){
+      e.preventDefault();
+      state.pinned = !state.pinned;
+      box.classList.toggle('unpinned', !state.pinned);
+      pin.textContent = state.pinned ? 'Unpin' : 'Pin';
+      save();
+    };
+    const nx = document.getElementById('pnext');
+    if (nx) nx.onclick = function(e){ e.preventDefault(); nextChannel(); };
+    box.classList.toggle('unpinned', !state.pinned);
   };
   /* Nothing loads until you ask it to. An iframe that never resolves is
      worse than a button that plainly says "not started yet". */
@@ -1417,7 +1434,12 @@ function setVideo(v, name){
     if (b) b.onclick = function(){ state.playing = true; save(); setVideo(v); };
   };
 
-  if (!state.playing){ poster(); if (TV) document.body.classList.add('vid'); save(); draw(); return; }
+  if (!state.playing){
+    poster();
+    box.classList.toggle('unpinned', !state.pinned);
+    if (TV) document.body.classList.add('vid');
+    save(); draw(); return;
+  }
 
   /* Reuse the last stream ID we resolved for this channel, so returning to
      the page doesn't depend on the relays answering all over again. */
@@ -1574,6 +1596,25 @@ function hashOf(str){
   let h = 0;
   for (let i = 0; i < str.length; i++){ h = ((h<<5) - h + str.charCodeAt(i)) | 0; }
   return h;
+}
+
+/* Step to the next live channel in the directory. Ones already resolved
+   switch instantly; the rest get looked up on the way. */
+function nextChannel(){
+  const live = CATALOG.filter(function(e){ return e.k === 'yt'; });
+  if (!live.length) return;
+  let at = -1;
+  for (let i = 0; i < live.length; i++){
+    const e = live[i];
+    if ((e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video)){ at = i; break; }
+  }
+  const e = live[(at + 1) % live.length];
+  state.playing = true;
+  markChannel(null);
+  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
+  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
+  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
+  drawCatalog();
 }
 
 /* ============ rendering ============ */
