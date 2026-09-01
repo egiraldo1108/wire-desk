@@ -338,6 +338,12 @@ window.setTimeout(function(){
     </div>
 
     <div class="block">
+      <h2>Follow a newsroom</h2>
+      <select id="bskypick" style="width:100%" aria-label="Add a Bluesky account"></select>
+      <p class="hint" id="bskynote">Posts go to that outlet's own tab, not Social.</p>
+    </div>
+
+    <div class="block">
       <h2>Watch on social</h2>
       <div class="field">
         <input type="text" id="social" placeholder="#hashtag, @handle, or words" aria-label="Social watch">
@@ -357,14 +363,8 @@ window.setTimeout(function(){
         <input type="text" id="vidin" placeholder="Paste a YouTube live URL" aria-label="Live video URL">
         <button class="go" id="vidgo">Play</button>
       </div>
-      <div class="chips" style="margin-top:8px">
-        <button class="chip" data-vid="c:UCoMdktPbSTixAyNGwb-UYkQ">Sky News</button>
-        <button class="chip" data-vid="c:UCzG5BnqHO8oNlrPDW9CYJog">Sky en Español</button>
-        <button class="chip" data-yt="@TraderTVLive">TraderTV</button>
-        <button class="chip" data-yt="@NinjaTrader">NinjaTrader</button>
-        <button class="chip" data-yt="@SmoothTraderTV">Smooth Trader</button>
-        <button class="chip" id="vidoff">Off</button>
-      </div>
+      <select id="vidpick" style="width:100%;margin-top:8px" aria-label="Pick a live channel"></select>
+      <button class="btn" id="vidoff" style="margin-top:6px">Turn video off</button>
       <p class="hint" id="vidnote" style="min-height:1em"></p>
       <details>
         <summary>Getting a link for any channel</summary>
@@ -414,6 +414,7 @@ window.setTimeout(function(){
           <option value="wires">Wires</option>
           <option value="world">World</option>
           <option value="politics">Politics</option>
+          <option value="finance">Finance</option>
           <option value="reads">Reads</option>
         </select>
       </div>
@@ -662,6 +663,14 @@ const FEEDS = [
   {id:'elect',  name:'Elections watch',    cat:'politics', kind:'rss', url:GN('election OR "vote count" OR primary OR ballot when:1d')},
 
   /* ---- hazards ---- */
+  /* ---- finance ---- */
+  {id:'cnbc',   name:'CNBC',               cat:'finance', kind:'rss', url:'https://www.cnbc.com/id/100003114/device/rss/rss.html'},
+  {id:'mktw',   name:'MarketWatch',        cat:'finance', kind:'rss', url:'https://feeds.marketwatch.com/marketwatch/topstories/'},
+  {id:'yfin',   name:'Yahoo Finance',      cat:'finance', kind:'rss', url:'https://finance.yahoo.com/news/rssindex'},
+  {id:'fed',    name:'Federal Reserve',    cat:'finance', kind:'rss', url:'https://www.federalreserve.gov/feeds/press_all.xml'},
+  {id:'rbiz',   name:'Reuters business',   cat:'finance', kind:'rss', url:GN('site:reuters.com business OR markets when:1d')},
+  {id:'mkts',   name:'Markets watch',      cat:'finance', kind:'rss', url:GN('"S&P 500" OR Nasdaq OR "stock market" OR "Federal Reserve" when:1d')},
+
   {id:'usgs',   name:'USGS earthquakes',   cat:'hazard', kind:'usgs'},
   {id:'nws',    name:'US weather alerts',  cat:'hazard', kind:'nws'},
 
@@ -683,6 +692,7 @@ const CATS = [
   {id:'wires',   label:'Wires'},
   {id:'world',   label:'World'},
   {id:'politics',label:'Politics'},
+  {id:'finance', label:'Finance'},
   {id:'hazard',  label:'Hazards'},
   {id:'espanol', label:'Espanol'},
   {id:'social',  label:'Social'},
@@ -690,7 +700,7 @@ const CATS = [
   {id:'mine',    label:'My feeds'},
   {id:'search',  label:'Search'}
 ];
-const DEFAULT_ON = ['local','state','wires','world','politics','hazard','espanol','social','mine','search'];
+const DEFAULT_ON = ['local','state','wires','world','politics','finance','hazard','espanol','social','mine','search'];
 
 /* ============ persistence (silently no-ops in sandboxed frames) ============ */
 const KEY = 'wiredesk.v2';
@@ -701,7 +711,7 @@ function save(){
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
       playing:state.playing, liveIds:state.liveIds, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk
     }));
   }catch(e){}
 }
@@ -723,6 +733,7 @@ function restore(){
     if (s.pinned === false) state.pinned = false;
     if (s.tab) state.tab = s.tab;
     if (s.seen) state.seen = s.seen;
+    if (s.bskyOk) state.bskyOk = s.bskyOk;
     if (s.liveIds) state.liveIds = s.liveIds;
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
@@ -748,6 +759,9 @@ const state = {
   restoredY: 0,
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
+  bskyOk: {},            // handle -> does it exist
+  bskyChecked: false,
+  resolving: false,
   forecast: [],          // two always-present forecast rows
   restored: false,
   primed: false,         // suppress alerts on first load
@@ -990,7 +1004,7 @@ async function bskySearch(term, label){
   });
   return posts.length;
 }
-async function bskyAuthor(handle){
+async function bskyAuthor(handle, cat){
   const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=25`;
   const j = await (await fetch(url,{cache:'no-store'})).json();
   const feed = j.feed||[];
@@ -999,7 +1013,7 @@ async function bskyAuthor(handle){
     add({title:clip(body,200),
          link:'https://bsky.app/profile/'+dig(p,'author','handle')+'/post/'+(p.uri||'').split('/').pop(),
          time:pdate(dig(p,'record','createdAt')||p.indexedAt)||Date.now(),
-         source:'@'+handle+' · Bluesky', cat:'social'});
+         source:'@'+handle+' · Bluesky', cat: cat || 'social'});
   });
   return feed.length;
 }
@@ -1022,7 +1036,7 @@ const redditSearch = async term =>
 
 async function pullWatch(w){
   const jobs = [];
-  if (w.kind === 'user') jobs.push(bskyAuthor(w.v.replace(/^@/,'')));
+  if (w.kind === 'user') jobs.push(bskyAuthor(w.v.replace(/^@/,''), w.cat));
   if (w.kind === 'tag'){ jobs.push(bskySearch('#'+w.v, '#'+w.v+' · Bluesky'), mastoTag(w.v), redditSearch(w.v)); }
   if (w.kind === 'term'){ jobs.push(bskySearch(w.v, `"${w.v}" · Bluesky`), redditSearch(w.v)); }
   let n=0, wins=0;
@@ -1054,7 +1068,7 @@ async function searchWires(q){
 /* How often each category is worth re-fetching. On one slow relay the
    difference between 45 requests a cycle and 20 is the difference between
    a usable page and a spinner. */
-const CADENCE = {local:1, state:1, wires:1, hazard:1, search:1,
+const CADENCE = {local:1, state:1, wires:1, hazard:1, search:1, finance:1,
                  politics:2, world:2, espanol:2, social:2, mine:2, reads:3};
 let cycle = 0;
 
@@ -1065,12 +1079,13 @@ async function loadAll(){
   tunePool();
   $('#status').textContent = 'Fetching…';
 
-  const PRIORITY = ['local','state','wires','hazard','search','politics','world','espanol','social','mine','reads'];
+  const PRIORITY = ['local','state','wires','finance','hazard','search','politics','world','espanol','social','mine','reads'];
   const jobs = allFeeds()
     .filter(f => state.on.has(f.cat))
     .filter(f => cycle % (CADENCE[f.cat] || 1) === 0 || !state.health[f.id])
     .sort((a,b) => PRIORITY.indexOf(a.cat) - PRIORITY.indexOf(b.cat));
-  const watches = state.on.has('social') ? state.watches : [];
+  /* a watch filed under State should load when State is on, not Social */
+  const watches = state.watches.filter(function(w){ return state.on.has(w.cat || 'social'); });
   const total = jobs.length + watches.length + (state.query?2:0) || 1;
 
   let done = 0;
@@ -1725,6 +1740,7 @@ function hashOf(str){
 /* Step to the next live channel in the directory. Ones already resolved
    switch instantly; the rest get looked up on the way. */
 function nextChannel(){
+  if (state.resolving) return;                 // don't stack lookups
   const live = CATALOG.filter(function(e){ return e.k === 'yt'; });
   if (!live.length) return;
   let at = -1;
@@ -1767,6 +1783,70 @@ function isForeign(c){
 }
 const hasCat = (c, list) => [...c.cats].some(function(x){ return list.indexOf(x) >= 0; });
 
+/* ============ Bluesky accounts ============
+   News organisations verify on Bluesky by using their own domain as their
+   handle, so these are checkable rather than guessable. Each one is filed
+   under the section it belongs to, not lumped into Social.
+   Handles are verified against Bluesky's public profile API before they
+   appear in the picker, so a wrong guess quietly disappears instead of
+   failing later. */
+const BSKY = [
+  /* confirmed in Bluesky's own news directory */
+  {n:'Reuters',            h:'reuters.com',            c:'wires',    ok:1},
+  {n:'Washington Post',    h:'washingtonpost.com',     c:'wires',    ok:1},
+  {n:'New York Times',     h:'nytimes.com',            c:'wires',    ok:1},
+  {n:'USA Today',          h:'usatoday.com',           c:'wires',    ok:1},
+  {n:'CNN',                h:'cnn.com',                c:'wires',    ok:1},
+  {n:'Los Angeles Times',  h:'latimes.com',            c:'wires',    ok:1},
+  {n:'SF Chronicle',       h:'sfchronicle.com',        c:'wires',    ok:1},
+  {n:'The Guardian',       h:'theguardian.com',        c:'world',    ok:1},
+  {n:'AFP News Agency',    h:'en.afp.com',             c:'world',    ok:1},
+  {n:'The Hill',           h:'thehill.com',            c:'politics', ok:1},
+  {n:'Bloomberg',          h:'bloomberg.com',          c:'finance',  ok:1},
+  {n:'CNBC',               h:'cnbc.com',               c:'finance',  ok:1},
+  {n:'Wall Street Journal',h:'wsj.com',                c:'finance',  ok:1},
+  {n:'The Verge',          h:'theverge.com',           c:'reads',    ok:1},
+  {n:'TechCrunch',         h:'techcrunch.com',         c:'reads',    ok:1},
+  {n:'Techmeme',           h:'techmeme.com',           c:'reads',    ok:1},
+  {n:'Rhode Island Current',h:'rhodeislandcurrent.com',c:'state',    ok:1},
+
+  /* same domain-handle convention, verified at runtime */
+  {n:'NPR',                h:'npr.org',                c:'wires'},
+  {n:'AP News',            h:'apnews.com',             c:'wires'},
+  {n:'ProPublica',         h:'propublica.org',         c:'wires'},
+  {n:'Politico',           h:'politico.com',           c:'politics'},
+  {n:'BBC News',           h:'bbc.com',                c:'world'},
+  {n:'Al Jazeera',         h:'aljazeera.com',          c:'world'},
+  {n:'The Atlantic',       h:'theatlantic.com',        c:'reads'},
+  {n:'WPRI 12',            h:'wpri.com',               c:'state'},
+  {n:'Providence Journal', h:'providencejournal.com',  c:'state'},
+  {n:"The Public's Radio", h:'thepublicsradio.org',    c:'state'}
+];
+
+/* Bluesky's profile lookup is public, CORS-clean and needs no relay. */
+async function verifyHandle(h){
+  if (state.bskyOk[h] !== undefined) return state.bskyOk[h];
+  try{
+    const r = await timedFetch(
+      'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=' + encodeURIComponent(h), 8000);
+    state.bskyOk[h] = !!r.ok;
+  }catch(e){ state.bskyOk[h] = false; }
+  return state.bskyOk[h];
+}
+async function verifyAll(){
+  if (state.bskyChecked) return;
+  state.bskyChecked = true;
+  const pending = BSKY.filter(function(b){ return !b.ok && state.bskyOk[b.h] === undefined; });
+  for (let i = 0; i < pending.length; i += 4){
+    await Promise.all(pending.slice(i, i+4).map(function(b){ return verifyHandle(b.h); }));
+    drawBskyPicker();
+  }
+  save();
+}
+function bskyLive(){
+  return BSKY.filter(function(b){ return b.ok || state.bskyOk[b.h] !== false; });
+}
+
 /* ============ sections ============
    Nine tabs over one stream. "All" is a digest — the four biggest stories
    from each section — and each tab opens the full list for that section.
@@ -1781,6 +1861,8 @@ const TABS = [
    match: c => hasCat(c,['wires']) && !isForeign(c)},
   {id:'t-pol',    label:'Politics', cats:['politics'],
    match: c => hasCat(c,['politics'])},
+  {id:'t-money',  label:'Finance',  cats:['finance'],
+   match: c => hasCat(c,['finance'])},
   {id:'t-world',  label:'World',    cats:['world','espanol','wires'],
    match: c => hasCat(c,['world','espanol']) || (hasCat(c,['wires']) && isForeign(c))},
   {id:'t-quake',  label:'Quakes & alerts', cats:['hazard'],
@@ -1843,6 +1925,46 @@ function openTab(id){
   window.scrollTo(0, 0);
 }
 
+function drawVidPicker(){
+  const sel = $('#vidpick');
+  if (!sel) return;
+  const groups = {};
+  CATALOG.filter(function(e){ return e.k === 'yt'; }).forEach(function(e){
+    (groups[e.r] = groups[e.r] || []).push(e);
+  });
+  let html = '<option value="">— pick a channel —</option>';
+  Object.keys(groups).forEach(function(g){
+    html += '<optgroup label="' + esc(g) + '">';
+    groups[g].forEach(function(e){
+      const key = e.v || e.h;
+      const on = (e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video);
+      html += '<option value="' + esc(key) + '"' + (on ? ' selected' : '') + '>' + esc(e.n) + '</option>';
+    });
+    html += '</optgroup>';
+  });
+  sel.innerHTML = html;
+}
+
+function drawBskyPicker(){
+  const sel = $('#bskypick');
+  if (!sel) return;
+  const LABEL = {wires:'U.S.', world:'World', politics:'Politics', finance:'Finance',
+                 state:'State', local:'Local', reads:'Reads'};
+  const groups = {};
+  bskyLive().forEach(function(b){ (groups[b.c] = groups[b.c] || []).push(b); });
+  let html = '<option value="">— add an account —</option>';
+  Object.keys(groups).forEach(function(g){
+    html += '<optgroup label="' + esc(LABEL[g] || g) + '">';
+    groups[g].forEach(function(b){
+      const already = state.watches.some(function(w){ return w.v === b.h; });
+      html += '<option value="' + esc(b.h) + '"' + (already ? ' disabled' : '') + '>'
+           + esc(b.n) + (already ? ' \u2713' : '') + '</option>';
+    });
+    html += '</optgroup>';
+  });
+  sel.innerHTML = html;
+}
+
 /* ============ rendering ============ */
 /* 0 = your town, 1 = your state, 2 = national, 3 = international. */
 function tierOf(c){
@@ -1850,6 +1972,7 @@ function tierOf(c){
   if (t.has('local')) return 0;
   if (t.has('state')) return 1;
   if (t.has('world') || t.has('espanol')) return 3;
+  if (t.has('finance')) return 2;
   if (t.has('wires') && isForeign(c)) return 3;   // US military in Gaza is still world news
   return 2;
 }
@@ -2173,6 +2296,14 @@ $('#furl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#fadd').click
 async function acceptVideo(input, label, cacheKey){
   const raw = (input||'').trim();
   if (!raw) return;
+  /* One lookup at a time. Rapid taps used to queue several relay fetches
+     at once and stall the whole page waiting on proxies that never answer. */
+  if (state.resolving){ $('#vidnote').textContent = 'Still looking up the last one…'; return; }
+  state.resolving = true;
+  try{ return await acceptVideoInner(raw, label, cacheKey); }
+  finally{ state.resolving = false; }
+}
+async function acceptVideoInner(raw, label, cacheKey){
   const note = $('#vidnote');
   note.textContent = 'Finding the channel…';
 
@@ -2213,7 +2344,34 @@ $('#vidgo').onclick = () => {
   acceptVideo(val);
 };
 $('#vidin').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#vidgo').click(); });
-$('#vidoff').onclick = () => { markChannel(null); $('#vidnote').textContent=''; setVideo(''); };
+$('#vidoff').onclick = () => { markChannel(null); $('#vidnote').textContent=''; setVideo(''); drawVidPicker(); };
+
+$('#vidpick').onchange = () => {
+  const key = $('#vidpick').value;
+  if (!key) return;
+  const e = CATALOG.filter(function(x){ return x.k === 'yt' && (x.v === key || x.h === key); })[0];
+  if (!e) return;
+  state.playing = true;
+  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
+  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
+  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
+};
+
+$('#bskypick').onfocus = verifyAll;
+$('#bskypick').onchange = () => {
+  const h = $('#bskypick').value;
+  if (!h) return;
+  const b = BSKY.filter(function(x){ return x.h === h; })[0];
+  if (!b) return;
+  if (!state.watches.some(function(w){ return w.v === h; })){
+    state.watches.push({kind:'user', v:h, cat:b.c});
+  }
+  state.on.add(b.c);
+  $('#bskynote').textContent = b.n + ' added to ' + b.c + '.';
+  $('#bskypick').value = '';
+  drawCats(); drawWatches(); drawBskyPicker(); drawSources(); save();
+  pullWatch({kind:'user', v:h, cat:b.c}).then(function(){ drawSources(); drawTabs(); draw(); });
+};
 document.querySelectorAll('[data-vid]').forEach(b => b.onclick = () => setVideo(b.dataset.vid));
 function markChannel(el){
   document.querySelectorAll('[data-yt],[data-vid]').forEach(x => x.setAttribute('aria-pressed','false'));
@@ -2356,7 +2514,7 @@ if (window.Notification && Notification.permission === 'granted'){
   $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
 }
 restoreStream();
-drawCats(); drawWatches(); drawMine(); drawCatalog(); drawSources();
+drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawSources();
 if (state.clusters.size){
   draw();
   if (state.restoredY) setTimeout(function(){ window.scrollTo(0, state.restoredY); }, 60);
