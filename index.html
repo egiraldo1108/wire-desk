@@ -481,7 +481,7 @@ function activeRelays(){
   }
   return RELAYS;
 }
-RELAYS.forEach(function(r){ r.busy = 0; r.q = []; r.wins = 0; r.fails = 0; });
+RELAYS.forEach(function(r){ r.busy = 0; r.q = []; r.wins = 0; r.fails = 0; r.ms = 0; });
 
 function acquire(r){
   return new Promise(function(res){
@@ -493,19 +493,24 @@ function acquire(r){
   });
 }
 
-/* Prefer relays that have been working, skip ones that clearly aren't,
-   and spread the load rather than piling onto whichever answered first. */
-let spread = 0;
+/* Order by measured speed, not just pass/fail. Two working relays can
+   differ eightfold — 360ms versus 2900ms — and always reaching for the
+   slow one wastes most of the load time. Untested relays get an
+   optimistic default so they still get a chance to prove themselves. */
 function relayOrder(){
   const all = activeRelays();
   const live = all.filter(function(r){ return !(r.fails >= 3 && r.wins === 0); });
-  const pool = live.length ? live : all.slice();
-  const rot = spread++ % pool.length;
-  return pool.slice(rot).concat(pool.slice(0, rot)).sort(function(a, b){
-    const sa = a.wins - a.fails * 2 - a.busy;
-    const sb = b.wins - b.fails * 2 - b.busy;
-    return sb - sa;
-  });
+  const pool = (live.length ? live : all.slice());
+  return pool.slice().sort(function(a, b){ return cost(a) - cost(b); });
+}
+function cost(r){
+  return (r.ms || 1200)          // measured latency, or an optimistic guess
+       + r.busy * 600            // already loaded up? let someone else go
+       + r.fails * 1500;         // recent failures push it down the list
+}
+function noteWin(r, dt){
+  r.wins++;
+  r.ms = r.ms ? Math.round(r.ms * 0.7 + dt * 0.3) : dt;   // rolling average
 }
 
 function timedFetch(url, ms){
@@ -541,13 +546,14 @@ async function relayFetch(url){
   for (let i = 0; i < order.length; i++){
     const relay = order[i];
     const release = await acquire(relay);
+    const t0 = Date.now();
     try{
       const r = await timedFetch(relay.u(url), 22000);
       if (!r.ok) throw new Error(relay.n + ' HTTP ' + r.status);
       let t = await r.text();
       if (relay.unwrap) t = relay.unwrap(t);
       if (!t || t.length < 80) throw new Error(relay.n + ' returned nothing');
-      relay.wins++;
+      noteWin(relay, Date.now() - t0);
       CACHE.set(url, {t:Date.now(), v:t});
       return t;
     }catch(e){
@@ -1994,6 +2000,7 @@ $('#relaytest').onclick = async () => {
   const probe = 'https://feeds.bbci.co.uk/news/world/rss.xml';
   const results = [];
   for (const r of activeRelays()){
+    r.fails = 0; r.wins = 0; r.ms = 0;    // fresh measurement each run
     const t0 = Date.now();
     try{
       const res = await timedFetch(r.u(probe), 15000);
@@ -2001,10 +2008,15 @@ $('#relaytest').onclick = async () => {
       let body = await res.text();
       if (r.unwrap) body = r.unwrap(body);
       if (!body || body.length < 200) throw new Error('empty');
-      results.push(r.n + ': ok (' + (Date.now()-t0) + 'ms)');
-    }catch(e){ results.push(r.n + ': ' + (e.message || 'failed')); }
+      const dt = Date.now() - t0;
+      noteWin(r, dt);                      // feed the result into the ordering
+      results.push(r.n + ': ok (' + dt + 'ms)');
+    }catch(e){ r.fails++; results.push(r.n + ': ' + (e.message || 'failed')); }
     out.innerHTML = results.join('<br>');
   }
+  tunePool();
+  const best = relayOrder()[0];
+  if (best) out.innerHTML = results.join('<br>') + '<br>Using <b>' + best.n + '</b> first.';
 };
 
 $('#report').onclick = ()=>{
