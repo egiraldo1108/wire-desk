@@ -193,6 +193,7 @@
   #player{display:none;background:#000}
   #player.on{display:block;position:sticky;top:0;z-index:9}
   #player.on.unpinned{position:static}
+  #player.on.shut{position:static;background:transparent}
   #player .frame{position:relative;width:100%;
     padding-top:56.25%;              /* fallback for older browsers */
     padding-top:min(56.25%,34vh);    /* keep it from eating the screen */
@@ -212,12 +213,21 @@
     display:flex;align-items:center;gap:10px;padding:7px 12px;
     background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);
   }
+  #player .pbarsel{
+    background:var(--ink);border:1px solid var(--line);border-radius:3px;
+    color:var(--text);padding:5px 8px;font-size:13px;max-width:52%;
+  }
   #player .pbar button{
     margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--dim);
     border-radius:3px;padding:4px 11px;font-size:12.5px;cursor:pointer;
   }
   #player .pbar button:hover{border-color:var(--lamp);color:var(--lamp)}
-  #player .pbar a{color:var(--lamp)}
+  #player .pbar a{color:var(--lamp);margin-left:auto}
+  @media (max-width:480px){
+    #player .pbar{gap:7px;padding:6px 9px}
+    #player .pbar button{padding:4px 8px;font-size:12px}
+    #player .pbarsel{font-size:16px;max-width:46%}   /* 16px stops iOS zooming */
+  }
   .streamhead{}
   .ticker{display:none}
 
@@ -913,6 +923,26 @@ function prune(){
   for (const [k,c] of state.clusters) if (c.last < cut) state.clusters.delete(k);
 }
 
+/* ============ prebuilt feeds ============
+   A GitHub Action fetches every feed on GitHub's servers — where CORS
+   does not exist — and commits the result as feeds.json. The page reads
+   that from its own domain, so there is no permission check, no proxy
+   and nothing to rate-limit. Relays become the fallback, not the path. */
+let PREBUILT = null, PREBUILT_AT = 0;
+
+async function loadPrebuilt(){
+  try{
+    const r = await fetch('./feeds.json?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.items){ PREBUILT = j.items; PREBUILT_AT = j.built || 0; }
+  }catch(e){ /* not deployed yet — relays carry on as before */ }
+}
+
+function prebuiltAge(){
+  return PREBUILT_AT ? Math.round((Date.now() - PREBUILT_AT) / 60000) : null;
+}
+
 /* ============ parsers ============ */
 function parseRSS(xml, feed){
   const doc = new DOMParser().parseFromString(xml,'text/xml');
@@ -936,7 +966,20 @@ function parseRSS(xml, feed){
   });
   return n;
 }
-const pullRSS = async f => parseRSS(await relayFetch(f.url), f);
+async function pullRSS(f){
+  /* Prebuilt first: no network permission needed, no relay, no queue. */
+  const pre = PREBUILT && PREBUILT[f.url];
+  if (pre && pre.length){
+    pre.forEach(function(it){
+      const t = pdate(it.d);
+      add({title: strip(it.t), link: (it.l||'').trim(),
+           time: isNaN(t) ? Date.now() : t, undated: isNaN(t),
+           source: f.name, cat: f.cat});
+    });
+    return pre.length;
+  }
+  return parseRSS(await relayFetch(f.url), f);
+}
 
 async function pullGDELT(feed, query){
   const q = encodeURIComponent(query || feed.query || 'breaking');
@@ -1078,11 +1121,14 @@ async function loadAll(){
   cycle++;
   tunePool();
   $('#status').textContent = 'Fetching…';
+  await loadPrebuilt();
 
   const PRIORITY = ['local','state','wires','finance','hazard','search','politics','world','espanol','social','mine','reads'];
   const jobs = allFeeds()
     .filter(f => state.on.has(f.cat))
-    .filter(f => cycle % (CADENCE[f.cat] || 1) === 0 || !state.health[f.id])
+    .filter(f => (PREBUILT && f.url && PREBUILT[f.url])
+              || cycle % (CADENCE[f.cat] || 1) === 0
+              || !state.health[f.id])
     .sort((a,b) => PRIORITY.indexOf(a.cat) - PRIORITY.indexOf(b.cat));
   /* a watch filed under State should load when State is on, not Social */
   const watches = state.watches.filter(function(w){ return state.on.has(w.cat || 'social'); });
@@ -1115,9 +1161,12 @@ async function loadAll(){
   $('#prog').style.width = '0%';
   const dead = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok).length;
   const upRelays = RELAYS.filter(function(r){ return r.wins > 0; }).length;
+  const age = prebuiltAge();
   $('#status').textContent = 'Updated ' + new Date().toLocaleTimeString()
     + (dead ? ' · ' + dead + ' source' + (dead>1?'s':'') + ' failing' : '')
-    + ' · ' + upRelays + '/' + RELAYS.length + ' relays up';
+    + (age !== null
+        ? ' · prebuilt ' + (age < 1 ? 'just now' : age + 'm old')
+        : ' · ' + upRelays + '/' + RELAYS.length + ' relays up');
   fireAlerts();
   state.primed = true;
   draw();
@@ -1522,7 +1571,11 @@ function setVideo(v, name){
   if (name) state.videoName = name;
   const box = $('#player');
   if (!v){
-    box.className = ''; box.innerHTML = '';
+    box.className = 'on shut';
+    box.innerHTML = '<div class="pbar"><select id="pbarpick" class="pbarsel" '
+      + 'aria-label="Pick a channel">' + channelOptions('\u25B6 Live TV') + '</select></div>';
+    const sel = document.getElementById('pbarpick');
+    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
     document.body.classList.remove('vid');
     save(); draw(); return;
   }
@@ -1533,10 +1586,11 @@ function setVideo(v, name){
     : 'https://www.youtube.com/watch?v=' + v;
 
   const bar = function(){
-    return '<div class="pbar"><span>' + esc(state.videoName || 'Live') + '</span>'
+    return '<div class="pbar">'
+      + '<select id="pbarpick" class="pbarsel" aria-label="Switch channel">'
+      + channelOptions(state.videoName || 'Live') + '</select>'
       + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
       + '<button id="ppin">' + (state.pinned ? 'Unpin' : 'Pin') + '</button>'
-      + '<button id="pnext">Next \u203A</button>'
       + '<button id="pstop">Stop</button></div>';
   };
   const mount = function(src){
@@ -1553,17 +1607,25 @@ function setVideo(v, name){
       pin.textContent = state.pinned ? 'Unpin' : 'Pin';
       save();
     };
-    const nx = document.getElementById('pnext');
-    if (nx) nx.onclick = function(e){ e.preventDefault(); nextChannel(); };
+    const sel = document.getElementById('pbarpick');
+    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
     box.classList.toggle('unpinned', !state.pinned);
   };
   /* Nothing loads until you ask it to. An iframe that never resolves is
      worse than a button that plainly says "not started yet". */
   const poster = function(){
-    box.innerHTML = '<div class="poster"><button id="pplay">\u25B6  Play '
+    box.innerHTML = '<div class="pbar">'
+      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
+      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
+      + '<button id="pstop">Hide</button></div>'
+      + '<div class="poster"><button id="pplay">\u25B6  Play '
       + esc(state.videoName || 'live news') + '</button></div>';
     const b = document.getElementById('pplay');
     if (b) b.onclick = function(){ state.playing = true; save(); setVideo(v); };
+    const sel = document.getElementById('pbarpick');
+    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
+    const hide = document.getElementById('pstop');
+    if (hide) hide.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); drawVidPicker(); };
   };
 
   if (!state.playing){
@@ -1925,14 +1987,12 @@ function openTab(id){
   window.scrollTo(0, 0);
 }
 
-function drawVidPicker(){
-  const sel = $('#vidpick');
-  if (!sel) return;
+function channelOptions(placeholder){
   const groups = {};
   CATALOG.filter(function(e){ return e.k === 'yt'; }).forEach(function(e){
     (groups[e.r] = groups[e.r] || []).push(e);
   });
-  let html = '<option value="">— pick a channel —</option>';
+  let html = '<option value="">' + esc(placeholder || '\u2014 pick a channel \u2014') + '</option>';
   Object.keys(groups).forEach(function(g){
     html += '<optgroup label="' + esc(g) + '">';
     groups[g].forEach(function(e){
@@ -1942,7 +2002,24 @@ function drawVidPicker(){
     });
     html += '</optgroup>';
   });
-  sel.innerHTML = html;
+  return html;
+}
+
+/* Every channel picker — rail, player bar, poster — runs through here. */
+function pickChannel(key){
+  if (!key) return;
+  const e = CATALOG.filter(function(x){ return x.k === 'yt' && (x.v === key || x.h === key); })[0];
+  if (!e) return;
+  state.playing = true;
+  markChannel(null);
+  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
+  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
+  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
+}
+
+function drawVidPicker(){
+  const sel = $('#vidpick');
+  if (sel) sel.innerHTML = channelOptions();
 }
 
 function drawBskyPicker(){
@@ -2129,7 +2206,8 @@ function drawSources(){
   const lines = allFeeds().filter(f=>state.on.has(f.cat)).map(f=>{
     const h = state.health[f.id];
     const cls = !h?'':h.ok?'ok':'bad';
-    const why = h && h.err ? esc(h.err) : '';
+    const viaBuild = PREBUILT && f.url && PREBUILT[f.url];
+    const why = h && h.err ? esc(h.err) : (viaBuild ? 'from the GitHub build' : '');
     return `<div class="srcline" ${why?`data-why="${why}" style="cursor:pointer"`:''}><span class="dot ${cls}"></span>${esc(f.name)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`;
   });
   if (state.on.has('social')) state.watches.forEach(w=>{
@@ -2346,16 +2424,7 @@ $('#vidgo').onclick = () => {
 $('#vidin').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#vidgo').click(); });
 $('#vidoff').onclick = () => { markChannel(null); $('#vidnote').textContent=''; setVideo(''); drawVidPicker(); };
 
-$('#vidpick').onchange = () => {
-  const key = $('#vidpick').value;
-  if (!key) return;
-  const e = CATALOG.filter(function(x){ return x.k === 'yt' && (x.v === key || x.h === key); })[0];
-  if (!e) return;
-  state.playing = true;
-  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
-  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
-  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
-};
+$('#vidpick').onchange = () => pickChannel($('#vidpick').value);
 
 $('#bskypick').onfocus = verifyAll;
 $('#bskypick').onchange = () => {
@@ -2514,6 +2583,7 @@ if (window.Notification && Notification.permission === 'granted'){
   $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
 }
 restoreStream();
+loadPrebuilt();
 drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawSources();
 if (state.clusters.size){
   draw();
