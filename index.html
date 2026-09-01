@@ -223,6 +223,19 @@
   }
   #player .pbar button:hover{border-color:var(--lamp);color:var(--lamp)}
   #player .pbar a{color:var(--lamp);margin-left:auto}
+  #player .capture{padding:16px 14px 18px;background:#0B1119;text-align:center}
+  #player .capture p{margin:0 0 10px;color:var(--dim);font-size:13px}
+  #player .capture .chint{margin:14px 0 8px;font-size:12px}
+  #player .capture .cgo{
+    display:inline-block;background:var(--lamp);color:#151A20;text-decoration:none;
+    border:none;border-radius:3px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;
+  }
+  #player .capture .cgo.alt{background:transparent;color:var(--lamp);border:1px solid var(--lamp)}
+  #player .capture input{
+    display:block;width:100%;margin-top:10px;background:var(--ink);
+    border:1px solid var(--line);border-radius:3px;padding:9px 10px;
+    color:var(--text);font-size:16px;
+  }
   @media (max-width:480px){
     #player .pbar{gap:7px;padding:6px 9px}
     #player .pbar button{padding:4px 8px;font-size:12px}
@@ -720,7 +733,7 @@ function save(){
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
-      playing:state.playing, liveIds:state.liveIds, videoName:state.videoName,
+      playing:state.playing, liveIds:state.liveIds, liveAt:state.liveAt, videoName:state.videoName,
       pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk
     }));
   }catch(e){}
@@ -745,6 +758,7 @@ function restore(){
     if (s.seen) state.seen = s.seen;
     if (s.bskyOk) state.bskyOk = s.bskyOk;
     if (s.liveIds) state.liveIds = s.liveIds;
+    if (s.liveAt) state.liveAt = s.liveAt;
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
   }catch(e){}
@@ -766,6 +780,7 @@ const state = {
   pinned: true,          // sticky player, toggled from the bar
   videoName: '',
   liveIds: {},           // channel -> last resolved live video id
+  liveAt: {},            // and when that was resolved
   restoredY: 0,
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
@@ -1560,11 +1575,26 @@ function videoSrc(v){
    embedding that directly is far more reliable — and since it re-runs on
    every load, it still follows the stream through restarts. */
 async function currentLive(chanId){
-  const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
-  let m = /"videoId":"([\w-]{11})"/.exec(html);
-  if (m) return m[1];
-  m = /watch\?v=([\w-]{11})/.exec(html);
-  return m ? m[1] : '';
+  /* 1. the channel's own /live page names the stream it's running now */
+  try{
+    const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
+    let m = /"videoId":"([\w-]{11})"/.exec(html);
+    if (m) return m[1];
+    m = /watch\?v=([\w-]{11})/.exec(html);
+    if (m) return m[1];
+  }catch(e){}
+
+  /* 2. YouTube publishes a plain RSS feed of every channel's recent uploads.
+        It's far smaller than the live page and often gets through when the
+        page doesn't — for a 24/7 news channel the newest entry is usually
+        the current stream. */
+  try{
+    const xml = await relayFetch('https://www.youtube.com/feeds/videos.xml?channel_id=' + chanId);
+    const m = /<yt:videoId>([\w-]{11})<\/yt:videoId>/.exec(xml);
+    if (m) return m[1];
+  }catch(e){}
+
+  return '';
 }
 function setVideo(v, name){
   state.video = v;
@@ -1613,6 +1643,59 @@ function setVideo(v, name){
   };
   /* Nothing loads until you ask it to. An iframe that never resolves is
      worse than a button that plainly says "not started yet". */
+  /* Automation can't always get through. Rather than a dead player, this
+     opens the channel on YouTube and takes the link back off the clipboard,
+     which then gets saved for good. */
+  const capture = function(msg){
+    box.innerHTML = '<div class="pbar">'
+      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
+      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
+      + '<button id="pstop">Hide</button></div>'
+      + '<div class="capture">'
+      + '<p>' + esc(msg) + '</p>'
+      + '<a class="cgo" href="' + link + '" target="_blank" rel="noopener">Open '
+      + esc(state.videoName || 'the channel') + ' on YouTube \u2197</a>'
+      + '<p class="chint">Tap the live stream there, copy the address, then come back:</p>'
+      + '<button class="cgo alt" id="cpaste">Paste the link &amp; save</button>'
+      + '<input id="cmanual" placeholder="\u2026or paste it here" aria-label="Paste stream link">'
+      + '</div>';
+
+    const sel = document.getElementById('pbarpick');
+    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
+    const hide = document.getElementById('pstop');
+    if (hide) hide.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); };
+
+    const take = function(text){
+      const id = parseVideo(text || '');
+      if (!id || id.indexOf('c:') === 0){
+        $('#vidnote').textContent = "That wasn't a video link — open the stream itself, then copy.";
+        return;
+      }
+      state.liveIds = state.liveIds || {};
+      state.liveIds[v] = id;
+      state.liveAt = state.liveAt || {};
+      state.liveAt[v] = Date.now();
+      state.playing = true;
+      save();
+      $('#vidnote').textContent = 'Saved. That stream will play from now on.';
+      setVideo(v);
+    };
+
+    const pb = document.getElementById('cpaste');
+    if (pb) pb.onclick = async function(){
+      try{
+        const t = await navigator.clipboard.readText();
+        take(t);
+      }catch(e){
+        $('#vidnote').textContent = 'Clipboard blocked — paste into the box instead.';
+        const box2 = document.getElementById('cmanual');
+        if (box2) box2.focus();
+      }
+    };
+    const man = document.getElementById('cmanual');
+    if (man) man.addEventListener('change', function(){ take(man.value); });
+  };
+
   const poster = function(){
     box.innerHTML = '<div class="pbar">'
       + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
@@ -1637,20 +1720,26 @@ function setVideo(v, name){
 
   /* Reuse the last stream ID we resolved for this channel, so returning to
      the page doesn't depend on the relays answering all over again. */
-  const known = state.liveIds && state.liveIds[v];
+  let known = state.liveIds && state.liveIds[v];
+  const savedAt = (state.liveAt && state.liveAt[v]) || 0;
+  if (known && savedAt && Date.now() - savedAt > 12*HOUR) known = null;   // stale, re-resolve
   mount(videoSrc(known || v));
 
   if (v.indexOf('c:') === 0){
     currentLive(v.slice(2)).then(function(id){
       if (id && state.video === v){
         state.liveIds = state.liveIds || {};
-        if (state.liveIds[v] !== id){ state.liveIds[v] = id; save(); mount(videoSrc(id)); }
+        if (state.liveIds[v] !== id){
+          state.liveIds[v] = id;
+          state.liveAt = state.liveAt || {};
+          state.liveAt[v] = Date.now();
+          save(); mount(videoSrc(id));
+        }
       }
-      else if (state.video === v && !known) $('#vidnote').textContent =
-        "Couldn't read the live stream — the relays are struggling. The Open on YouTube link under the player still works.";
+      else if (state.video === v && !known)
+        capture("Couldn't find the current stream automatically.");
     }).catch(function(){
-      if (state.video === v && !known) $('#vidnote').textContent =
-        "Couldn't read the live stream — set up your own relay (README) and this fixes itself.";
+      if (state.video === v && !known) capture('The proxies are down, so the lookup failed.');
     });
   }
   if (TV) document.body.classList.add('vid');
