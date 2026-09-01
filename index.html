@@ -166,6 +166,7 @@
   }
   body.tv .count{font-size:40px;font-size:2.6vw}
   body.tv .streamhead .meta{font-size:22px;font-size:1.3vw}
+  body.tv #wx{font-size:22px;font-size:1.3vw;color:var(--lamp)}
   body.tv .tvclock{font-family:"Newsreader",Georgia,serif;font-size:40px;font-size:2.6vw;margin-left:auto}
   body.tv .item{
     grid-template-columns:11vw 1fr;
@@ -282,18 +283,14 @@ window.setTimeout(function(){
 
     <div class="block">
       <h2>Live video</h2>
+      <p class="hint" style="margin:0 0 9px">Sky News plays by default. More channels under Browse sources, or paste any YouTube live link.</p>
       <div class="field">
         <input type="text" id="vidin" placeholder="Paste a YouTube live URL" aria-label="Live video URL">
         <button class="go" id="vidgo">Play</button>
       </div>
       <div class="chips" style="margin-top:8px">
-        <button class="chip" data-vid="c:UCNye-wNBqNL5ZzHSJj3l8Bg">Al Jazeera</button>
-        <button class="chip" data-yt="@SkyNews">Sky News</button>
-        <button class="chip" data-yt="@dwnews">DW</button>
-        <button class="chip" data-yt="@FRANCE24English">France 24</button>
-        <button class="chip" data-yt="@ABCNews">ABC News</button>
-        <button class="chip" data-yt="@NBCNews">NBC News</button>
-        <button class="chip" data-yt="@LiveNOWFOX">LiveNOW</button>
+        <button class="chip" data-vid="c:UCoMdktPbSTixAyNGwb-UYkQ">Sky News</button>
+        <button class="chip" data-vid="c:UCzG5BnqHO8oNlrPDW9CYJog">Sky en Español</button>
         <button class="chip" id="vidoff">Off</button>
       </div>
       <p class="hint" id="vidnote" style="min-height:1em"></p>
@@ -301,6 +298,30 @@ window.setTimeout(function(){
         <summary>Getting a link for any channel</summary>
         <p>Open the channel on YouTube, click its live stream, copy the address bar. Works with <code>watch?v=…</code>, <code>youtu.be/…</code>, <code>/live/…</code>, or a <code>/channel/UC…</code> URL — a channel link auto-follows whatever they're streaming right now, so it never goes stale. Free 24/7 news channels: Sky News, DW News, France 24 English, ABC News Live, CBS News, NBC News NOW, LiveNOW from FOX, Bloomberg.</p>
       </details>
+    </div>
+
+    <div class="block">
+      <h2>Your area</h2>
+      <p class="hint" style="margin:0 0 9px">Detected: <span id="locnote">checking…</span></p>
+      <div class="field">
+        <input type="text" id="zip" placeholder="ZIP code" inputmode="numeric" aria-label="ZIP code">
+        <button class="go" id="zipgo">Set</button>
+      </div>
+      <button class="btn" id="gps" style="margin-top:6px">Use my exact location</button>
+      <p class="hint">Sets local headlines, the weather readout, and weather alerts for your exact spot instead of the whole state.</p>
+    </div>
+
+    <div class="block">
+      <h2>Browse sources</h2>
+      <input type="text" id="catq" placeholder="Search: Colombia, español, Japan…" aria-label="Search sources">
+      <div class="chips" id="catfilters" style="margin-top:8px">
+        <button class="chip" data-cf="all" aria-pressed="true">All</button>
+        <button class="chip" data-cf="en">English</button>
+        <button class="chip" data-cf="es">Español</button>
+        <button class="chip" data-cf="yt">Live video</button>
+      </div>
+      <div id="catalog" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
+      <p class="hint">Free, no accounts. Sources abroad route through Google News' per-country feed, which is far steadier than each outlet's own RSS.</p>
     </div>
 
     <div class="block">
@@ -314,6 +335,7 @@ window.setTimeout(function(){
         <span class="hint" style="margin:0">File under</span>
         <select id="fcat">
           <option value="mine" selected>My feeds</option>
+          <option value="espanol">Español</option>
           <option value="local">Local</option>
           <option value="wires">Wires</option>
           <option value="world">World</option>
@@ -337,6 +359,7 @@ window.setTimeout(function(){
     <div class="block">
       <h2>Feed health</h2>
       <div id="srcs"></div>
+      <button class="btn" id="report" style="margin-top:10px;display:none">Copy failure report</button>
       <details>
         <summary>Why does one say "fail"?</summary>
         <p>Your browser only reads another site's data if that site says it's OK, and most news sites never turned that on. So the page asks a free middleman — a relay — to fetch it instead. A fail is almost always the relay being busy, not the news site. Refresh usually fixes it. The README has a 10-minute setup for your own relay.</p>
@@ -366,6 +389,7 @@ window.setTimeout(function(){
     <div class="streamhead">
       <span class="count" id="count">—</span>
       <span class="meta" id="status">Loading…</span>
+      <span class="meta" id="wx"></span>
       <span class="meta" id="next" style="margin-left:auto"></span>
     </div>
     <div class="bar"><i id="prog"></i></div>
@@ -387,23 +411,67 @@ window.setTimeout(function(){
    ============================================================ */
 
 const RELAYS = [
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
+  {name:'allorigins', url: u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`},
+  {name:'codetabs',   url: u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`},
+  {name:'corsproxy',  url: u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`},
+  {name:'allorigins-json', url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+   unwrap: t => JSON.parse(t).contents},
+  {name:'thingproxy', url: u => `https://thingproxy.freeboard.io/fetch/${u}`}
 ];
+
+/* Requests are spread across relays and throttled to a few at a time.
+   Firing thirty at once through one free proxy looks like abuse and gets
+   the whole batch rate-limited — which is what "most feeds failed" is. */
+const MAX_PARALLEL = 3;
+let relayCursor = 0, bestRelay = 0;
+const queue = {running:0, waiting:[]};
+
+function slot(){
+  return new Promise(function(release){
+    function start(){
+      queue.running++;
+      release(function(){
+        queue.running--;
+        const next = queue.waiting.shift();
+        if (next) next();
+      });
+    }
+    if (queue.running < MAX_PARALLEL) start(); else queue.waiting.push(start);
+  });
+}
+
+/* A hung relay must not block the queue behind it. */
+function timedFetch(url, ms){
+  if (!window.AbortController) return fetch(url, {cache:'no-store'});
+  const ctl = new AbortController();
+  const timer = setTimeout(function(){ ctl.abort(); }, ms || 13000);
+  return fetch(url, {cache:'no-store', signal:ctl.signal})
+    .then(function(r){ clearTimeout(timer); return r; },
+          function(e){ clearTimeout(timer); throw e; });
+}
 const MASTODON = 'https://mastodon.social';
+
+/* Sky News' channel ID, verified. The out-of-the-box stream, so video
+   works on first open with nothing to paste. Channel IDs never change,
+   and YouTube resolves the current live stream itself on every load. */
+const DEFAULT_VIDEO = 'c:UCoMdktPbSTixAyNGwb-UYkQ';
 const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+
+/* Google News publishes a top-stories feed for every country and language
+   it covers. One endpoint, always valid — far safer than guessing each
+   outlet's own RSS path, especially abroad. */
+const GTOP = (hl, gl) => `https://news.google.com/rss?hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
+const GSITE = (site, hl, gl) =>
+  `https://news.google.com/rss/search?q=${encodeURIComponent('site:'+site+' when:2d')}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
 
 const FEEDS = [
   /* ---- Rhode Island / southern New England ---- */
   {id:'wpri',   name:'WPRI 12',            cat:'local', kind:'rss', url:'https://www.wpri.com/feed/'},
   {id:'ricur',  name:'Rhode Island Current',cat:'local',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
-  {id:'projo',  name:'Providence Journal', cat:'local', kind:'rss', url:'https://www.providencejournal.com/arc/outboundfeeds/rss/category/news/?outputType=xml'},
-  {id:'pubrad', name:"The Public's Radio", cat:'local', kind:'rss', url:'https://thepublicsradio.org/feed/'},
-  {id:'ecori',  name:'ecoRI News',         cat:'local', kind:'rss', url:'https://ecori.org/feed'},
+  {id:'projo',  name:'Providence Journal', cat:'local', kind:'rss', url:GN('site:providencejournal.com when:2d')},
+  {id:'pubrad', name:"The Public's Radio", cat:'local', kind:'rss', url:GN('site:thepublicsradio.org when:2d')},
+  {id:'ecori',  name:'WJAR / NBC 10',      cat:'local', kind:'rss', url:GN('site:turnto10.com when:2d')},
   {id:'wbur',   name:'WBUR (Boston)',      cat:'local', kind:'rss', url:'https://www.wbur.org/rss/'},
-  {id:'gnri',   name:'RI on Google News',  cat:'local', kind:'rss', url:GN('"Rhode Island" OR Woonsocket OR "North Smithfield" OR Providence when:1d')},
-  {id:'nwsri',  name:'RI weather alerts',  cat:'local', kind:'nws', area:'RI'},
 
   /* ---- wires ---- */
   {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
@@ -452,12 +520,13 @@ const CATS = [
   {id:'world',   label:'World'},
   {id:'politics',label:'Politics'},
   {id:'hazard',  label:'Hazards'},
+  {id:'espanol', label:'Español'},
   {id:'social',  label:'Social'},
   {id:'reads',   label:'Reads'},
   {id:'mine',    label:'My feeds'},
   {id:'search',  label:'Search'}
 ];
-const DEFAULT_ON = ['local','wires','world','politics','hazard','social','mine','search'];
+const DEFAULT_ON = ['local','wires','world','politics','hazard','espanol','social','mine','search'];
 
 /* ============ persistence (silently no-ops in sandboxed frames) ============ */
 const KEY = 'wiredesk.v2';
@@ -466,7 +535,7 @@ function save(){
     localStorage.setItem(KEY, JSON.stringify({
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
-      video:state.video
+      video:state.video, chans:state.chans, loc:state.loc
     }));
   }catch(e){}
 }
@@ -481,6 +550,9 @@ function restore(){
     if (s.interval) $('#interval').value = s.interval;
     if (s.sound) $('#sound').checked = true;
     if (s.video) state.video = s.video;
+    if (s.chans) state.chans = s.chans;
+    if (s.loc) state.loc = s.loc;
+    state.restored = true;
   }catch(e){}
 }
 
@@ -493,6 +565,8 @@ const state = {
   on: new Set(DEFAULT_ON),
   query: '',
   video: '',
+  chans: {},   // '@handle' -> 'c:UC…', cached after first lookup
+  loc: null,   // {lat, lon, city, region, zip, how}
   primed: false,         // suppress alerts on first load
   unread: 0,
   timer:null, tick:null, due:0, loading:false
@@ -523,7 +597,7 @@ const $ = s => document.querySelector(s);
 const esc = s => (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const strip = h => { const d=document.createElement('div'); d.innerHTML=h||''; return (d.textContent||'').replace(/\s+/g,' ').trim(); };
 const clip = (s,n) => s.length>n ? s.slice(0,n-1).trimEnd()+'…' : s;
-const allFeeds = () => FEEDS.concat(state.custom);
+const allFeeds = () => FEEDS.concat(state.custom).concat(locFeeds());
 const HOUR = 3600e3;
 
 function age(ms){
@@ -557,17 +631,38 @@ function pdate(s){
 }
 
 async function relayFetch(url){
-  let last;
-  for (const make of RELAYS){
+  const done = await slot();
+  try{
+    /* Some feeds send CORS headers and need no middleman at all. Trying
+       direct first costs one quick request and takes load off the relays. */
     try{
-      const r = await fetch(make(url), {cache:'no-store'});
-      if (!r.ok) throw new Error('HTTP '+r.status);
-      const t = await r.text();
-      if (t && t.length > 80) return t;
-      throw new Error('empty body');
-    }catch(e){ last = e; }
-  }
-  throw last || new Error('all relays failed');
+      const r = await timedFetch(url, 7000);
+      if (r.ok){
+        const t = await r.text();
+        if (t && t.length > 80) return t;
+      }
+    }catch(e){}
+
+    let last;
+    const start = (bestRelay + (relayCursor++)) % RELAYS.length;
+    for (let i = 0; i < RELAYS.length; i++){
+      const idx = (start + i) % RELAYS.length;
+      const relay = RELAYS[idx];
+      try{
+        const r = await timedFetch(relay.url(url));
+        if (!r.ok) throw new Error(relay.name + ' HTTP ' + r.status);
+        let t = await r.text();
+        if (relay.unwrap) t = relay.unwrap(t);
+        if (!t || t.length < 80) throw new Error(relay.name + ' returned nothing');
+        bestRelay = idx;                       // stick with whatever just worked
+        return t;
+      }catch(e){
+        last = e;
+        relayCursor = (relayCursor + 1) % RELAYS.length;
+      }
+    }
+    throw last || new Error('every relay failed');
+  } finally { done(); }
 }
 
 /* ============ story clustering ============
@@ -672,7 +767,9 @@ async function pullUSGS(feed){
 }
 
 async function pullNWS(feed){
-  const url = 'https://api.weather.gov/alerts/active?limit=40' + (feed.area ? '&area='+feed.area : '');
+  let url = 'https://api.weather.gov/alerts/active?limit=40';
+  if (feed.point) url += '&point=' + feed.point;
+  else if (feed.area) url += '&area=' + feed.area;
   const j = await (await fetch(url,{cache:'no-store',headers:{'Accept':'application/geo+json'}})).json();
   (j.features||[]).forEach(f=>{
     const p=f.properties;
@@ -787,10 +884,23 @@ async function loadAll(){
   }
 
   await Promise.all(runs);
+
+  /* One quiet retry for whatever failed — by now the queue is empty and
+     a different relay is at the front, so throttled feeds usually land. */
+  const failed = jobs.filter(f => state.health[f.id] && !state.health[f.id].ok);
+  if (failed.length){
+    $('#status').textContent = 'Retrying ' + failed.length + '…';
+    relayCursor++;
+    await Promise.all(failed.map(f => pull(f)));
+    drawSources();
+  }
+
   prune();
   state.loading = false;
   $('#prog').style.width = '0%';
-  $('#status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  const dead = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok).length;
+  $('#status').textContent = 'Updated ' + new Date().toLocaleTimeString()
+    + (dead ? ' · ' + dead + ' source' + (dead>1?'s':'') + ' failing' : '');
   fireAlerts();
   state.primed = true;
   draw();
@@ -841,6 +951,113 @@ function fireAlerts(){
   }
 }
 window.addEventListener('focus', () => { state.unread = 0; document.title = 'Wire Desk'; });
+
+
+/* ============ location ============
+   Three ways in, in order of accuracy: the device's own GPS, a ZIP the
+   user types, or a rough guess from their IP. Whatever lands, it drives
+   the local news query, the weather readout and point-based NWS alerts,
+   so "local" means where you actually are. */
+const WMO = {0:'Clear',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Freezing fog',
+  51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',56:'Freezing drizzle',57:'Freezing drizzle',
+  61:'Light rain',63:'Rain',65:'Heavy rain',66:'Freezing rain',67:'Freezing rain',
+  71:'Light snow',73:'Snow',75:'Heavy snow',77:'Snow grains',
+  80:'Showers',81:'Showers',82:'Heavy showers',85:'Snow showers',86:'Snow showers',
+  95:'Thunderstorms',96:'Thunderstorms, hail',99:'Thunderstorms, hail'};
+
+async function fromZip(zip){
+  const j = await (await timedFetch('https://api.zippopotam.us/us/' + encodeURIComponent(zip), 8000)).json();
+  const pl = j.places && j.places[0];
+  if (!pl) throw new Error('ZIP not found');
+  return {zip: j['post code'], city: pl['place name'], region: pl['state abbreviation'],
+          lat: +pl.latitude, lon: +pl.longitude, country: 'US', how: 'ZIP'};
+}
+async function fromIP(){
+  const j = await (await timedFetch('https://ipwho.is/', 7000)).json();
+  if (!j || !j.success) throw new Error('IP lookup failed');
+  return {city: j.city, region: j.region_code || j.region, lat: j.latitude, lon: j.longitude,
+          zip: j.postal, country: j.country_code, how: 'network'};
+}
+function fromGPS(){
+  return new Promise(function(res, rej){
+    if (!navigator.geolocation) return rej(new Error('no geolocation'));
+    navigator.geolocation.getCurrentPosition(
+      function(pos){ res({lat: pos.coords.latitude, lon: pos.coords.longitude, how: 'GPS'}); },
+      function(e){ rej(new Error(e.code === 1 ? 'permission denied' : 'position unavailable')); },
+      {timeout: 12000, maximumAge: 600000});
+  });
+}
+/* NWS knows the city, county and forecast zone for any US point. */
+async function nameUSPoint(L){
+  try{
+    const j = await (await timedFetch('https://api.weather.gov/points/' + L.lat.toFixed(4) + ',' + L.lon.toFixed(4), 9000)).json();
+    const rl = dig(j, 'properties', 'relativeLocation', 'properties');
+    if (rl){ L.city = L.city || rl.city; L.region = L.region || rl.state; }
+    const cty = dig(j, 'properties', 'county');
+    if (cty) L.countyUrl = cty;
+    L.forecast = dig(j, 'properties', 'forecast');
+    L.country = 'US';
+  }catch(e){}
+  return L;
+}
+async function setLocation(L){
+  if (!L || !L.lat) return;
+  if (!L.city || !L.forecast) await nameUSPoint(L);
+  state.loc = L;
+  drawLoc(); save();
+  loadWeather();
+  const fresh = locFeeds();
+  fresh.forEach(function(f){ pull(f).then(function(){ drawSources(); draw(); }); });
+  drawSources();
+}
+
+/* Feeds that only exist once we know where "here" is. */
+function locFeeds(){
+  const L = state.loc;
+  if (!L || !L.lat) return [];
+  const out = [];
+  if (L.city){
+    const near = '"' + L.city + '"' + (L.region ? ' OR "' + L.city + ', ' + L.region + '"' : '');
+    out.push({id:'loc-news', name: L.city + ' news', cat:'local', kind:'rss',
+              url: GN(near + ' when:2d')});
+  }
+  if (L.country === 'US'){
+    out.push({id:'loc-alerts', name:'Alerts near you', cat:'local', kind:'nws',
+              point: L.lat.toFixed(4) + ',' + L.lon.toFixed(4)});
+  }
+  return out;
+}
+
+async function loadWeather(){
+  const L = state.loc;
+  if (!L || !L.lat){ $('#wx').textContent = ''; return; }
+  try{
+    const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + L.lat.toFixed(3)
+      + '&longitude=' + L.lon.toFixed(3)
+      + '&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto';
+    const j = await (await timedFetch(u, 9000)).json();
+    const c = j.current || {};
+    const desc = WMO[c.weather_code] || '';
+    $('#wx').textContent = (c.temperature_2m !== undefined ? Math.round(c.temperature_2m) + '\u00B0' : '')
+      + (desc ? ' ' + desc : '') + (L.city ? ' \u00B7 ' + L.city : '');
+  }catch(e){ $('#wx').textContent = L.city || ''; }
+}
+
+function drawLoc(){
+  const L = state.loc;
+  $('#locnote').textContent = L && L.city
+    ? L.city + (L.region ? ', ' + L.region : '') + ' \u00B7 via ' + L.how
+    : (L && L.lat ? L.lat.toFixed(2) + ', ' + L.lon.toFixed(2) + ' \u00B7 via ' + L.how
+                  : 'Not set — using default sources');
+}
+
+/* Quiet auto-detect on first run. IP location is rough (often the town
+   your ISP routes through), so GPS or a ZIP overrides it. */
+async function autoLocate(){
+  if (state.loc && state.loc.lat) { drawLoc(); loadWeather(); return; }
+  try{ await setLocation(await fromIP()); }
+  catch(e){ drawLoc(); }
+}
 
 /* ============ TV display mode ============
    ?tv=1 turns the page into a hands-off board: no controls, big type,
@@ -978,6 +1195,133 @@ function drawTicker(rows){
   $('#tickin').innerHTML = bits + bits;   // doubled so the loop reads seamlessly
 }
 
+
+/* ============ source directory ============
+   Everything here is free and needs no account. Where an outlet's own
+   RSS path is unreliable or unknown, it goes through Google News'
+   per-country feed instead — one endpoint that is always valid. */
+const CATALOG = [
+  /* --- English, international --- */
+  {n:'BBC World',           r:'UK',        l:'en', k:'rss', c:'world', u:'https://feeds.bbci.co.uk/news/world/rss.xml'},
+  {n:'Guardian World',      r:'UK',        l:'en', k:'rss', c:'world', u:'https://www.theguardian.com/world/rss'},
+  {n:'Euronews',            r:'Europe',    l:'en', k:'rss', c:'world', u:GSITE('euronews.com','en-GB','GB')},
+  {n:'Deutsche Welle',      r:'Germany',   l:'en', k:'rss', c:'world', u:'https://rss.dw.com/rdf/rss-en-all'},
+  {n:'France 24',           r:'France',    l:'en', k:'rss', c:'world', u:'https://www.france24.com/en/rss'},
+  {n:'Al Jazeera',          r:'Qatar',     l:'en', k:'rss', c:'world', u:'https://www.aljazeera.com/xml/rss/all.xml'},
+  {n:'CBC',                 r:'Canada',    l:'en', k:'rss', c:'world', u:'https://www.cbc.ca/webfeed/rss/rss-world'},
+  {n:'ABC Australia',       r:'Australia', l:'en', k:'rss', c:'world', u:GTOP('en-AU','AU')},
+  {n:'Channel News Asia',   r:'Singapore', l:'en', k:'rss', c:'world', u:GSITE('channelnewsasia.com','en-SG','SG')},
+  {n:'Times of India',      r:'India',     l:'en', k:'rss', c:'world', u:GTOP('en-IN','IN')},
+  {n:'Japan Times',         r:'Japan',     l:'en', k:'rss', c:'world', u:GSITE('japantimes.co.jp','en-US','US')},
+  {n:'Africanews',          r:'Africa',    l:'en', k:'rss', c:'world', u:GSITE('africanews.com','en-GB','GB')},
+  {n:'Nigeria top stories', r:'Nigeria',   l:'en', k:'rss', c:'world', u:GTOP('en-NG','NG')},
+  {n:'South Africa top',    r:'S. Africa', l:'en', k:'rss', c:'world', u:GTOP('en-ZA','ZA')},
+  {n:'Ireland top stories', r:'Ireland',   l:'en', k:'rss', c:'world', u:GTOP('en-IE','IE')},
+  {n:'Philippines top',     r:'Philippines',l:'en',k:'rss', c:'world', u:GTOP('en-PH','PH')},
+  {n:'Kyiv Independent',    r:'Ukraine',   l:'en', k:'rss', c:'world', u:GSITE('kyivindependent.com','en-US','US')},
+
+  /* --- Español --- */
+  {n:'Colombia — portada',  r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GTOP('es-419','CO')},
+  {n:'El Tiempo',           r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('eltiempo.com','es-419','CO')},
+  {n:'El Espectador',       r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('elespectador.com','es-419','CO')},
+  {n:'Semana',              r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('semana.com','es-419','CO')},
+  {n:'Blu Radio',           r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('bluradio.com','es-419','CO')},
+  {n:'Noticias Caracol',    r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('noticiascaracol.com','es-419','CO')},
+  {n:'El Colombiano',       r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('elcolombiano.com','es-419','CO')},
+  {n:'México — portada',    r:'México',    l:'es', k:'rss', c:'espanol', u:GTOP('es-419','MX')},
+  {n:'Milenio',             r:'México',    l:'es', k:'rss', c:'espanol', u:GSITE('milenio.com','es-419','MX')},
+  {n:'España — portada',    r:'España',    l:'es', k:'rss', c:'espanol', u:GTOP('es','ES')},
+  {n:'El País',             r:'España',    l:'es', k:'rss', c:'espanol', u:'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada'},
+  {n:'Argentina — portada', r:'Argentina', l:'es', k:'rss', c:'espanol', u:GTOP('es-419','AR')},
+  {n:'Chile — portada',     r:'Chile',     l:'es', k:'rss', c:'espanol', u:GTOP('es-419','CL')},
+  {n:'Perú — portada',      r:'Perú',      l:'es', k:'rss', c:'espanol', u:GTOP('es-419','PE')},
+  {n:'Venezuela — portada', r:'Venezuela', l:'es', k:'rss', c:'espanol', u:GTOP('es-419','VE')},
+  {n:'Ecuador — portada',   r:'Ecuador',   l:'es', k:'rss', c:'espanol', u:GTOP('es-419','EC')},
+  {n:'Rep. Dominicana',     r:'R.D.',      l:'es', k:'rss', c:'espanol', u:GTOP('es-419','DO')},
+  {n:'Puerto Rico',         r:'P.R.',      l:'es', k:'rss', c:'espanol', u:GTOP('es-419','PR')},
+  {n:'Cuba — portada',      r:'Cuba',      l:'es', k:'rss', c:'espanol', u:GTOP('es-419','CU')},
+  {n:'BBC Mundo',           r:'Global',    l:'es', k:'rss', c:'espanol', u:'https://feeds.bbci.co.uk/mundo/rss.xml'},
+  {n:'DW Español',          r:'Global',    l:'es', k:'rss', c:'espanol', u:'https://rss.dw.com/rdf/rss-sp-all'},
+  {n:'France 24 Español',   r:'Global',    l:'es', k:'rss', c:'espanol', u:'https://www.france24.com/es/rss'},
+  {n:'CNN en Español',      r:'Global',    l:'es', k:'rss', c:'espanol', u:GSITE('cnnespanol.cnn.com','es-419','US')},
+  {n:'Infobae',             r:'Global',    l:'es', k:'rss', c:'espanol', u:GSITE('infobae.com','es-419','AR')},
+  {n:'Univision',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('univision.com','es-419','US')},
+  {n:'Telemundo',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('telemundo.com','es-419','US')},
+
+  /* --- live video. Verified IDs play instantly; handles resolve once. --- */
+  {n:'Sky News',            r:'UK',        l:'en', k:'yt', v:'c:UCoMdktPbSTixAyNGwb-UYkQ'},
+  {n:'Al Jazeera English',  r:'Qatar',     l:'en', k:'yt', v:'c:UCNye-wNBqNL5ZzHSJj3l8Bg'},
+  {n:'Sky News Español',    r:'UK',        l:'es', k:'yt', v:'c:UCzG5BnqHO8oNlrPDW9CYJog'},
+  {n:'DW News',             r:'Germany',   l:'en', k:'yt', h:'@dwnews'},
+  {n:'France 24 English',   r:'France',    l:'en', k:'yt', h:'@FRANCE24English'},
+  {n:'ABC News Live',       r:'USA',       l:'en', k:'yt', h:'@ABCNews'},
+  {n:'NBC News NOW',        r:'USA',       l:'en', k:'yt', h:'@NBCNews'},
+  {n:'CBS News',            r:'USA',       l:'en', k:'yt', h:'@CBSNews'},
+  {n:'LiveNOW from FOX',    r:'USA',       l:'en', k:'yt', h:'@LiveNOWFOX'},
+  {n:'Bloomberg',           r:'USA',       l:'en', k:'yt', h:'@markets'},
+  {n:'Euronews English',    r:'Europe',    l:'en', k:'yt', h:'@euronews'},
+  {n:'DW Español',          r:'Germany',   l:'es', k:'yt', h:'@dwespanol'},
+  {n:'France 24 Español',   r:'France',    l:'es', k:'yt', h:'@FRANCE24Espanol'},
+  {n:'RTVE Noticias',       r:'España',    l:'es', k:'yt', h:'@rtvenoticias'},
+  {n:'Noticias Caracol',    r:'Colombia',  l:'es', k:'yt', h:'@NoticiasCaracol'},
+  {n:'El Tiempo',           r:'Colombia',  l:'es', k:'yt', h:'@eltiempo'},
+  {n:'Milenio',             r:'México',    l:'es', k:'yt', h:'@milenio'}
+];
+let catFilter = 'all';
+
+function catalogRows(){
+  const q = ($('#catq').value || '').trim().toLowerCase();
+  return CATALOG.filter(function(e){
+    if (catFilter === 'en' && e.l !== 'en') return false;
+    if (catFilter === 'es' && e.l !== 'es') return false;
+    if (catFilter === 'yt' && e.k !== 'yt') return false;
+    if (!q) return true;
+    return (e.n + ' ' + e.r + ' ' + (e.l === 'es' ? 'espanol spanish' : 'english')).toLowerCase().indexOf(q) >= 0;
+  });
+}
+function addedAlready(e){
+  return e.k === 'rss' && state.custom.some(function(f){ return f.url === e.u; });
+}
+function drawCatalog(){
+  const rows = catalogRows();
+  $('#catalog').innerHTML = rows.length ? rows.map(function(e, i){
+    const on = addedAlready(e) || (e.k === 'yt' && (e.v === state.video || state.chans[e.h] === state.video));
+    return '<div class="entry"><span class="label">' + esc(e.n)
+      + ' <span style="color:#5D7186">' + esc(e.r) + (e.k==='yt' ? ' · live' : '') + '</span></span>'
+      + '<button class="kill" data-cat="' + rows.indexOf(e) + '" style="color:'
+      + (on ? '#6FB08A' : '#E8A33D') + ';font-size:13px">' + (on ? 'on' : (e.k==='yt' ? 'play' : 'add')) + '</button></div>';
+  }).join('') : '<p class="hint" style="margin:0">Nothing matches that.</p>';
+
+  $('#catalog').querySelectorAll('[data-cat]').forEach(function(b){
+    b.onclick = function(){
+      const e = catalogRows()[+b.dataset.cat];
+      if (!e) return;
+      if (e.k === 'yt'){
+        markChannel(null);
+        if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v); }
+        else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h]); }
+        else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
+        drawCatalog();
+        return;
+      }
+      if (addedAlready(e)){
+        state.custom = state.custom.filter(function(f){ return f.url !== e.u; });
+      } else {
+        const feed = {id:'k'+Math.abs(hashOf(e.u)), name:e.n, cat:e.c, kind:'rss', url:e.u};
+        state.custom.push(feed);
+        state.on.add(e.c);
+        pull(feed).then(function(){ drawSources(); draw(); });
+      }
+      drawCats(); drawMine(); drawSources(); drawCatalog(); save();
+    };
+  });
+}
+function hashOf(str){
+  let h = 0;
+  for (let i = 0; i < str.length; i++){ h = ((h<<5) - h + str.charCodeAt(i)) | 0; }
+  return h;
+}
+
 /* ============ rendering ============ */
 function score(c){
   const hrs = (Date.now() - c.last)/HOUR;
@@ -1043,7 +1387,8 @@ function drawSources(){
   const lines = allFeeds().filter(f=>state.on.has(f.cat)).map(f=>{
     const h = state.health[f.id];
     const cls = !h?'':h.ok?'ok':'bad';
-    return `<div class="srcline" title="${h&&h.err?esc(h.err):''}"><span class="dot ${cls}"></span>${esc(f.name)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`;
+    const why = h && h.err ? esc(h.err) : '';
+    return `<div class="srcline" ${why?`data-why="${why}" style="cursor:pointer"`:''}><span class="dot ${cls}"></span>${esc(f.name)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`;
   });
   if (state.on.has('social')) state.watches.forEach(w=>{
     const h = state.health['w:'+w.v];
@@ -1051,7 +1396,14 @@ function drawSources(){
     const tag = w.kind==='tag'?'#':w.kind==='user'?'@':'';
     lines.push(`<div class="srcline"><span class="dot ${cls}"></span>${tag}${esc(w.v)}<span class="n">${h?(h.ok?h.n:'fail'):'—'}</span></div>`);
   });
+  const bad = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok).length;
   $('#srcs').innerHTML = lines.join('') || '<p class="hint" style="margin:0">Nothing selected.</p>';
+  $('#srcs').querySelectorAll('[data-why]').forEach(el => el.onclick = () => {
+    let n = el.nextElementSibling;
+    if (n && n.className === 'hint'){ n.remove(); return; }
+    el.insertAdjacentHTML('afterend', '<p class="hint" style="margin:2px 0 6px">' + el.dataset.why + '</p>');
+  });
+  $('#report').style.display = bad ? 'block' : 'none';
 }
 
 function drawWatches(){
@@ -1152,7 +1504,7 @@ $('#furl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#fadd').click
 
 /* Takes anything YouTube-shaped — a stream, a channel, an @handle —
    and always tries to end up holding a channel ID. */
-async function acceptVideo(input, label){
+async function acceptVideo(input, label, cacheKey){
   const raw = (input||'').trim();
   if (!raw) return;
   const note = $('#vidnote');
@@ -1173,6 +1525,7 @@ async function acceptVideo(input, label){
   try{
     const ch = await resolveChannel(lookupUrl);
     if (ch){
+      if (cacheKey){ state.chans[cacheKey] = ch; }
       note.textContent = (label || 'Channel') + ' locked in — it will follow their live stream from now on.';
       setVideo(ch);
       return;
@@ -1194,12 +1547,43 @@ $('#vidgo').onclick = () => {
   acceptVideo(val);
 };
 $('#vidin').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#vidgo').click(); });
-$('#vidoff').onclick = () => setVideo('');
+$('#vidoff').onclick = () => { markChannel(null); $('#vidnote').textContent=''; setVideo(''); };
 document.querySelectorAll('[data-vid]').forEach(b => b.onclick = () => setVideo(b.dataset.vid));
-document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
+function markChannel(el){
   document.querySelectorAll('[data-yt],[data-vid]').forEach(x => x.setAttribute('aria-pressed','false'));
-  b.setAttribute('aria-pressed','true');
-  acceptVideo('https://www.youtube.com/' + b.dataset.yt, b.textContent);
+  if (el) el.setAttribute('aria-pressed','true');
+}
+document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
+  markChannel(b);
+  const handle = b.dataset.yt;
+  const cached = state.chans[handle];
+  if (cached){                       // looked up once before — instant now
+    $('#vidnote').textContent = '';
+    setVideo(cached);
+    return;
+  }
+  acceptVideo('https://www.youtube.com/' + handle, b.textContent, handle);
+});
+
+$('#zipgo').onclick = async () => {
+  const z = ($('#zip').value || '').trim();
+  if (!/^\d{5}$/.test(z)){ $('#zip').value=''; $('#zip').placeholder='Five digits, e.g. 02896'; return; }
+  $('#locnote').textContent = 'Looking up ' + z + '…';
+  try{ await setLocation(await fromZip(z)); $('#zip').value=''; }
+  catch(e){ $('#locnote').textContent = "Couldn't find that ZIP."; }
+};
+$('#zip').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#zipgo').click(); });
+$('#gps').onclick = async () => {
+  $('#locnote').textContent = 'Asking your device…';
+  try{ await setLocation(await fromGPS()); }
+  catch(e){ $('#locnote').textContent = 'Location ' + e.message + ' — type a ZIP instead.'; }
+};
+
+$('#catq').addEventListener('input', drawCatalog);
+$('#catfilters').querySelectorAll('[data-cf]').forEach(b => b.onclick = () => {
+  catFilter = b.dataset.cf;
+  $('#catfilters').querySelectorAll('[data-cf]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  drawCatalog();
 });
 
 $('#filter').addEventListener('input', draw);
@@ -1212,6 +1596,19 @@ $('#tvlink').onclick = ()=>{
   try{ document.execCommand('copy'); $('#tvlink').textContent = 'Copied — open it on the TV'; }
   catch(e){ $('#tvlink').textContent = 'Copy this link to the TV'; }
 };
+$('#report').onclick = ()=>{
+  const lines = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok)
+    .map(f => f.name + '  [' + f.id + ']  ' + (f.url || f.kind) + '  →  ' + (state.health[f.id].err || 'unknown'));
+  const text = 'Wire Desk failures (' + new Date().toISOString() + ')\n'
+    + 'device: ' + DEVICE + '\nua: ' + navigator.userAgent + '\n\n' + lines.join('\n');
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); $('#report').textContent = 'Copied — paste it to Claude'; }
+  catch(e){ $('#report').textContent = 'Select and copy from the box below'; ta.style.cssText = 'width:100%;height:120px'; return; }
+  document.body.removeChild(ta);
+};
+
 $('#tvswap').onclick = ()=>{
   const base = location.href.split('?')[0].split('#')[0];
   location.href = base + '?tv=' + (TV ? '0' : '1');
@@ -1241,6 +1638,7 @@ window.onerror = function(msg, src, line){
 };
 
 restore();
+if (!state.video && !PARAMS.video && !state.restored) state.video = DEFAULT_VIDEO;
 document.body.classList.add('dev-' + DEVICE);
 $('#devnote').textContent = ({tv:'Television', phone:'Phone', tablet:'Tablet', desktop:'Computer'})[DEVICE]
   + (TV ? ' · display mode' : ' · full controls');
@@ -1259,10 +1657,20 @@ if (TV){
 if (window.Notification && Notification.permission === 'granted'){
   $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
 }
-drawCats(); drawWatches(); drawMine(); drawSources();
+drawCats(); drawWatches(); drawMine(); drawCatalog(); drawSources();
 if (state.video && !TV) setVideo(state.video);
-loadAll(); schedule();
+document.querySelectorAll('[data-vid]').forEach(b => {
+  if (b.dataset.vid === state.video) b.setAttribute('aria-pressed','true');
+});
+Object.keys(state.chans).forEach(h => {
+  if (state.chans[h] === state.video){
+    const b = document.querySelector('[data-yt="' + h + '"]');
+    if (b) b.setAttribute('aria-pressed','true');
+  }
+});
+loadAll(); schedule(); autoLocate();
 setInterval(draw, 60000);
+setInterval(loadWeather, 900000);
 window.__wireRan = true;
 </script>
 </body>
