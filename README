@@ -12,6 +12,28 @@ So headlines get grouped into stories by word overlap, and each story shows how 
 
 The timestamp shown is when the story *first* appeared, and the link goes to whoever broke it.
 
+Two rules keep one outlet from owning the screen:
+
+- **No source appears more than twice in any four consecutive rows.** A fast, prolific feed would otherwise take ten slots in a row purely by posting often. When a source hits its cap, the next-best *different* source is pulled up instead.
+- **Feeds with no usable publication date are scored down.** Some feeds omit dates or format them oddly. Those items used to get stamped with the current time, which made everything from that outlet look like breaking news and pinned it to the top. Now they're marked and ranked below anything with a real timestamp.
+
+### Home first
+
+Every story lands in one of four tiers, and the tier multiplies its score:
+
+| Tier | Weight | What's in it |
+|---|---|---|
+| Local | 2.4× | your town, alerts for your coordinates |
+| State | 1.7× | your state's outlets and a statewide query |
+| National | 1.15× | wires, politics, hazards, your own feeds |
+| International | 0.45× | World and Español |
+
+On top of the weighting there's a hard cap: **two international stories per 28 rows**, dropped in at positions 14 and 28. The rest are held back until the domestic stream runs dry. Tested with international making up 40% of the pool — still exactly two in the first 28.
+
+To change the ratio, edit `BLOCK` in `applyQuota()`. It's one international slot per block, so 14 gives you 2 per 28; raise it for fewer, lower it for more.
+
+Earthquakes are filtered to **magnitude 4.0 and up** (`QUAKE_MIN`). Below that is constant background noise.
+
 ## Alerts
 
 Click "Turn on desktop alerts" and the browser asks permission. After that you get a notification when:
@@ -79,9 +101,42 @@ The rail shows what it detected, and there's a **Switch to display mode** button
 
 There's also a watchdog: a tiny script written in old-style JavaScript runs first and checks four seconds later whether the main script ever started. If the browser was too old to even read the main script, you get a plain message saying so instead of a blank screen.
 
+## Your area
+
+Local means where you actually are, not a hardcoded state. Three ways in, in order of accuracy:
+
+1. **Auto** — on first load it makes one quiet call to an IP geolocation service and uses whatever comes back. No permission prompt, no setup. It's approximate: IP location often lands on whatever town your ISP routes through, which can be a few towns off.
+2. **ZIP code** — type five digits. Looked up through Zippopotam, no key needed. Reliable and precise enough for news and weather.
+3. **Use my exact location** — asks the browser for GPS. Most accurate, and the only one that needs permission. Requires HTTPS, which GitHub Pages gives you.
+
+Whatever it lands on drives three things:
+
+- **Local headlines** — a Google News query built from your city and state, added automatically to the Local category
+- **Weather** — current temperature and conditions in the header, refreshed every 15 minutes, from Open-Meteo (no key, works worldwide)
+- **Two forecast rows in the stream**, sitting at positions 3 and 4 — high enough to see without scrolling, low enough that breaking news still leads. In the US these are NWS's own plain-English periods (Today / Tonight); elsewhere they're built from Open-Meteo with high, low and precipitation odds. They refresh every 30 minutes, sit outside the clustering pass so they never merge or get crowded out, and are never treated as alerts. They're hidden while a filter is active, so filtering still means what it says.
+- **Weather alerts for your point** — NWS alerts filtered to your exact coordinates rather than the whole state, so you're not getting warnings for somewhere two hours away
+
+Your choice is saved, so it only asks once. In TV display mode the weather shows in amber next to the clock.
+
+Outside the US, the local news query and weather still work; NWS alerts don't, since that's a US service.
+
+## Browse sources
+
+A searchable directory of 60 free sources, no accounts anywhere. Type a country, a language, or an outlet name and tap to add.
+
+**English international:** BBC, Guardian, Euronews, DW, France 24, Al Jazeera, CBC, ABC Australia, Channel News Asia, Times of India, Japan Times, Africanews, Kyiv Independent, plus country front pages for Nigeria, South Africa, Ireland and the Philippines.
+
+**Español:** Colombia gets the most coverage — country front page plus El Tiempo, El Espectador, Semana, Blu Radio, Noticias Caracol and El Colombiano. Also México, España, Argentina, Chile, Perú, Venezuela, Ecuador, República Dominicana, Puerto Rico and Cuba, plus BBC Mundo, DW Español, France 24 Español, CNN en Español, Infobae, El País, Univision and Telemundo. They land in their own **Español** category so you can toggle the whole language on and off.
+
+**Live video:** 17 channels including Sky News, Sky News Español, Al Jazeera, DW, France 24 (both languages), ABC, NBC, CBS, LiveNOW, Bloomberg, Euronews, RTVE, Noticias Caracol, El Tiempo and Milenio.
+
+Most foreign sources route through Google News' per-country feed (`hl=es-419&gl=CO&ceid=CO:es` and equivalents) rather than each outlet's own RSS path. One endpoint that's always valid beats guessing dozens of paths that move around — which is exactly the failure mode that broke feeds earlier.
+
 ## Live video
 
-Paste any YouTube live URL into **Live video** in the rail and the official YouTube player embeds right in the page. Four URL shapes work:
+**Video works with nothing to set up.** Sky News plays by default on first open — its channel ID is baked in, so there's no lookup and no link to paste. Seventeen more live channels sit in **Browse sources**; each is looked up once and then remembered, so it's instant every time after.
+
+If you'd rather paste something else, **Live video** in the rail takes any YouTube URL. Five shapes work:
 
 | You paste | What happens |
 |---|---|
@@ -91,13 +146,15 @@ Paste any YouTube live URL into **Live video** in the rail and the official YouT
 | `youtube.com/channel/UC…` | used directly |
 | `youtube.com/@handle` | looked up, then used |
 
+**How it finds the stream.** It reads the channel's own `/live` page and pulls out the video ID currently being broadcast, then embeds that directly. YouTube's older `live_stream?channel=` endpoint is tried first but frequently answers "Video unavailable" even when a channel is plainly streaming, so it's only the fallback. The lookup re-runs on every load and again every 30 minutes, so restarts are picked up automatically. If it still won't play, an "Open it on YouTube" link appears under the player.
+
 **It finds the current stream address for you.** Broadcasters restart their 24/7 streams every so often, which kills the video ID and leaves you with a dead player. So whatever you paste, the page reads that YouTube page and pulls out the channel's permanent ID. From then on the embed uses YouTube's `live_stream?channel=` form, which makes YouTube look up whatever that outlet is airing *at that moment*, on every single page load. Set it once and it keeps working.
 
 If the lookup fails (relay throttled, say), it falls back to the specific stream you pasted and tells you plainly that this one will eventually go stale.
 
 Preset buttons for Sky News, DW, France 24, ABC News, NBC News and LiveNOW resolve the same way — they're stored as `@handles`, not IDs, so they can't rot. If a broadcaster ever renames their handle, paste their channel URL instead.
 
-Streams start muted, because every browser blocks autoplay with sound. Click the player to unmute.
+Streams start muted, because every browser blocks autoplay with sound. Click the player to unmute. Tap **Off** to drop the video entirely and go back to a pure headline board.
 
 A note on the "free IPTV playlist" `.m3u8` links floating around: those are unlicensed restreams of pay channels. They break constantly and aren't worth wiring in. Everything above is a broadcaster's own player, embedded the way they intend.
 
@@ -132,9 +189,15 @@ What to expect:
 
 Your browser only reads another site's data if that site says "anyone can read this." Most news sites never turned that on — not to block you, they just never bothered. So the page asks a free middleman service to fetch the feed and hand it back. That middleman is the relay.
 
+There are nine relays, and **each keeps its own queue of three** rather than sharing one global limit. A single shared cap of three meant forty-odd feeds crawling through a three-wide door; nine relays at three apiece is up to 27 requests in flight while still never hammering any one proxy. Simulated with 45 feeds, that's a 9× speedup with load spread perfectly evenly.
+
+Relays are also scored as they run. Wins count for them, failures count double against them, and any relay that fails four times without a single success is dropped for the rest of the session. The status line shows how many are up.
+
+Two more things cut the load: feeds are tried **direct first** (a fair number send proper CORS headers and need no middleman, and those don't take a queue slot at all), and responses are cached for 90 seconds so a redraw never costs another round trip.
+
 Three consequences:
 
-1. **A `fail` is usually the relay, not the news site.** Free relays get hammered and throttle. Refresh usually clears it.
+1. **A `fail` is usually the relay, not the news site.** Tap any failed source in the health list to see the actual error. If it says HTTP 429 or a timeout, that's throttling — refresh. If it says "not a valid feed" or "no items" every single time, the URL is wrong and needs replacing.
 2. **USGS, NWS, Hacker News, GDELT and Bluesky never fail** — they turned the setting on, so they're fetched direct with no middleman. That's your reliable core.
 3. **Your own relay fixes it for good.** Ten minutes, free.
 
@@ -173,7 +236,8 @@ Finding links: `thesite.com/feed` or `/rss`; any subreddit takes `.rss` on the e
 
 ## Known rough edges
 
-- **Some feed URLs will need swapping.** RSS paths move around, especially at local TV stations and Gannett papers. The health panel tells you which ones are dead — anything showing `fail` on every refresh is a bad URL, not a busy relay.
+- **Some feed URLs will need swapping.** RSS paths move around, especially at local TV stations and Gannett papers. Tap a failed source to see why. Anything failing identically on every refresh is a bad URL, not a busy relay — replace it with a Google News query for that outlet: `news.google.com/rss/search?q=site:thepaper.com+when:2d`. That one endpoint is far more reliable than guessing a station's feed path, which is why several local sources already use it.
+- **Copy failure report** puts every failing source, its URL and its exact error on your clipboard, ready to paste into a chat for help.
 - **RSS runs 2–15 minutes behind.** Fine for awareness, not for anything time-critical.
 - **Clustering is word-overlap, not meaning.** It occasionally merges two stories that share a lot of proper nouns, or misses a match when outlets word a headline very differently. Tuning knobs are `j >= 0.42` and `hit >= 2` in `add()` — raise for stricter grouping, lower for looser.
 - Nothing scrapes or logs in anywhere. Public feeds and public APIs only.
