@@ -362,6 +362,11 @@ window.setTimeout(function(){
     <div class="block">
       <h2>Feed health</h2>
       <div id="srcs"></div>
+      <button class="btn" id="relaytest" style="margin-top:10px">Test relays</button>
+      <div id="relayout" class="hint"></div>
+      <input type="text" id="myrelay" placeholder="Your own relay URL (optional)"
+             style="margin-top:8px" aria-label="Custom relay URL">
+      <p class="hint">Free proxies throttle hard. A Cloudflare Worker of your own takes ten minutes and ends this permanently — the README has the ten lines of code.</p>
       <button class="btn" id="report" style="margin-top:10px;display:none">Copy failure report</button>
       <details>
         <summary>Why does one say "fail"?</summary>
@@ -416,22 +421,31 @@ window.setTimeout(function(){
 const RELAYS = [
   {n:'allorigins',  u: x => `https://api.allorigins.win/raw?url=${encodeURIComponent(x)}`},
   {n:'codetabs',    u: x => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(x)}`},
-  {n:'corsproxy',   u: x => `https://corsproxy.io/?url=${encodeURIComponent(x)}`},
   {n:'cors.lol',    u: x => `https://api.cors.lol/?url=${encodeURIComponent(x)}`},
-  {n:'cors.eu',     u: x => `https://cors.eu.org/${x}`},
-  {n:'corsworkers', u: x => `https://test.cors.workers.dev/?${x}`},
-  {n:'thingproxy',  u: x => `https://thingproxy.freeboard.io/fetch/${x}`},
   {n:'allorigins2', u: x => `https://api.allorigins.win/get?url=${encodeURIComponent(x)}`,
-   unwrap: t => JSON.parse(t).contents},
-  {n:'whateverorigin', u: x => `https://whateverorigin.org/get?url=${encodeURIComponent(x)}`,
    unwrap: t => JSON.parse(t).contents}
 ];
+/* Removed: corsproxy.io (now answers 401 without a paid key),
+   whateverorigin (http-only, so an https page can't touch it),
+   thingproxy, cors.eu.org and test.cors.workers.dev (all dead).
+   Four working relays beat nine where five burn your retries. */
 
 /* Each relay gets its own small queue rather than one shared one.
    A single global cap of three meant forty feeds crawled through a
    three-wide door; nine relays at three apiece is up to 27 in flight
    while still never hammering any one proxy. */
 const PER_RELAY = 3;
+
+/* A relay you host yourself is the only one that never throttles.
+   Paste a Cloudflare Worker URL in the rail and it takes priority. */
+function activeRelays(){
+  if (state.myRelay){
+    const mine = {n:'yours', u: x => state.myRelay + (state.myRelay.indexOf('?') < 0 ? '?url=' : '&url=') + encodeURIComponent(x),
+                  busy:0, q:[], wins: 99, fails:0};
+    return [mine].concat(RELAYS);
+  }
+  return RELAYS;
+}
 RELAYS.forEach(function(r){ r.busy = 0; r.q = []; r.wins = 0; r.fails = 0; });
 
 function acquire(r){
@@ -448,8 +462,9 @@ function acquire(r){
    and spread the load rather than piling onto whichever answered first. */
 let spread = 0;
 function relayOrder(){
-  const live = RELAYS.filter(function(r){ return !(r.fails >= 4 && r.wins === 0); });
-  const pool = live.length ? live : RELAYS.slice();
+  const all = activeRelays();
+  const live = all.filter(function(r){ return !(r.fails >= 3 && r.wins === 0); });
+  const pool = live.length ? live : all.slice();
   const rot = spread++ % pool.length;
   return pool.slice(rot).concat(pool.slice(0, rot)).sort(function(a, b){
     const sa = a.wins - a.fails * 2 - a.busy;
@@ -477,7 +492,7 @@ async function relayFetch(url){
 
   /* Feeds that send CORS headers need no middleman and no queue slot. */
   try{
-    const r = await timedFetch(url, 6000);
+    const r = await timedFetch(url, 5000);
     if (r.ok){
       const t = await r.text();
       if (t && t.length > 80){ CACHE.set(url, {t:Date.now(), v:t}); return t; }
@@ -486,11 +501,13 @@ async function relayFetch(url){
 
   let last;
   const order = relayOrder();
-  for (let i = 0; i < Math.min(4, order.length); i++){
+  /* Walk the whole list. Capping at four meant a request could spend
+     every attempt on dead proxies and never reach a working one. */
+  for (let i = 0; i < order.length; i++){
     const relay = order[i];
     const release = await acquire(relay);
     try{
-      const r = await timedFetch(relay.u(url), 12000);
+      const r = await timedFetch(relay.u(url), 22000);
       if (!r.ok) throw new Error(relay.n + ' HTTP ' + r.status);
       let t = await r.text();
       if (relay.unwrap) t = relay.unwrap(t);
@@ -596,7 +613,7 @@ function save(){
     localStorage.setItem(KEY, JSON.stringify({
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
-      video:state.video, chans:state.chans, loc:state.loc
+      video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay
     }));
   }catch(e){}
 }
@@ -613,6 +630,7 @@ function restore(){
     if (s.video) state.video = s.video;
     if (s.chans) state.chans = s.chans;
     if (s.loc) state.loc = s.loc;
+    if (s.myRelay){ state.myRelay = s.myRelay; $('#myrelay').value = s.myRelay; }
     state.restored = true;
   }catch(e){}
 }
@@ -628,6 +646,7 @@ const state = {
   video: '',
   chans: {},             // '@handle' -> 'c:UC…', cached after first lookup
   loc: null,             // {lat, lon, city, region, zip, how}
+  myRelay: '',           // user-hosted proxy, tried before all others
   forecast: [],          // two always-present forecast rows
   restored: false,
   primed: false,         // suppress alerts on first load
@@ -755,7 +774,9 @@ function parseRSS(xml, feed){
   const doc = new DOMParser().parseFromString(xml,'text/xml');
   if (doc.querySelector('parsererror')) throw new Error('not a valid feed');
   const nodes = [...doc.querySelectorAll('item, entry')];
-  if (!nodes.length) throw new Error('no items');
+  /* A site: query with nothing published in the window returns a valid,
+     empty feed. That's an answer, not an error. */
+  if (!nodes.length) return 0;
   let n = 0;
   nodes.slice(0,40).forEach(el => {
     const title = strip(txt(el,'title'));
@@ -1319,7 +1340,12 @@ function setVideo(v){
   if (v.indexOf('c:') === 0){
     currentLive(v.slice(2)).then(function(id){
       if (id && state.video === v) mount(videoSrc(id), 'https://www.youtube.com/watch?v=' + id);
-    }).catch(function(){});
+      else if (state.video === v) $('#vidnote').textContent =
+        "Couldn't read the live stream — the relays are struggling. The Open on YouTube link under the player still works.";
+    }).catch(function(){
+      if (state.video === v) $('#vidnote').textContent =
+        "Couldn't read the live stream — set up your own relay (README) and this fixes itself.";
+    });
   }
   if (TV) document.body.classList.add('vid');
   save(); draw();
@@ -1794,6 +1820,32 @@ $('#tvlink').onclick = ()=>{
   try{ document.execCommand('copy'); $('#tvlink').textContent = 'Copied — open it on the TV'; }
   catch(e){ $('#tvlink').textContent = 'Copy this link to the TV'; }
 };
+$('#myrelay').addEventListener('change', () => {
+  const v = $('#myrelay').value.trim();
+  state.myRelay = /^https?:\/\//i.test(v) ? v : '';
+  save();
+  if (state.myRelay){ CACHE.clear(); loadAll(); }
+});
+
+$('#relaytest').onclick = async () => {
+  const out = $('#relayout');
+  out.textContent = 'Testing…';
+  const probe = 'https://feeds.bbci.co.uk/news/world/rss.xml';
+  const results = [];
+  for (const r of activeRelays()){
+    const t0 = Date.now();
+    try{
+      const res = await timedFetch(r.u(probe), 15000);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      let body = await res.text();
+      if (r.unwrap) body = r.unwrap(body);
+      if (!body || body.length < 200) throw new Error('empty');
+      results.push(r.n + ': ok (' + (Date.now()-t0) + 'ms)');
+    }catch(e){ results.push(r.n + ': ' + (e.message || 'failed')); }
+    out.innerHTML = results.join('<br>');
+  }
+};
+
 $('#report').onclick = ()=>{
   const lines = allFeeds().filter(f => state.health[f.id] && !state.health[f.id].ok)
     .map(f => f.name + '  [' + f.id + ']  ' + (f.url || f.kind) + '  →  ' + (state.health[f.id].err || 'unknown'));
