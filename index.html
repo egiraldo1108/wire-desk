@@ -90,9 +90,8 @@
   .btn.live{border-color:var(--ok);color:var(--ok)}
   label.check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim);margin-top:10px;cursor:pointer}
 
-  .streamhead{display:flex;align-items:baseline;gap:14px;padding:22px 26px 14px;
-    border-bottom:1px solid var(--line);position:sticky;top:0;
-    background:linear-gradient(var(--ink) 82%,rgba(15,22,32,0));z-index:5;flex-wrap:wrap}
+  .streamhead{display:flex;align-items:baseline;gap:14px;padding:18px 26px 14px;
+    border-bottom:1px solid var(--line);background:var(--ink);flex-wrap:wrap}
   .count{font-family:"Newsreader",serif;font-size:24px;font-weight:500}
   .streamhead .meta{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
 
@@ -143,7 +142,7 @@
       border-bottom:1px solid var(--line);padding-top:6px}
     .rail.open{display:block}
     .rail .brand,.rail .tagline{display:none}
-    .streamhead{padding:14px 16px 12px;top:47px}
+    .streamhead{padding:14px 16px 12px}
     .item{grid-template-columns:58px 1fr;padding-right:16px}
     .age{padding-right:10px}
     .head{font-size:17px}
@@ -152,9 +151,33 @@
   }
   /* ---------- live video ---------- */
   #player{display:none;background:#000}
-  #player.on{display:block}
-  #player .frame{position:relative;width:100%;padding-top:56.25%}
+  #player.on{display:block;position:sticky;top:0;z-index:9}
+  #player .frame{position:relative;width:100%;
+    padding-top:56.25%;              /* fallback for older browsers */
+    padding-top:min(56.25%,34vh);    /* keep it from eating the screen */
+  }
   #player iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}
+  #player .poster{
+    position:relative;width:100%;padding-top:56.25%;padding-top:min(56.25%,34vh);
+    background:#0B1119;border-bottom:1px solid var(--line);
+  }
+  #player .poster button{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:var(--lamp);color:#151A20;border:none;border-radius:999px;
+    padding:13px 26px;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;
+  }
+  #player .poster button:hover{background:#F2B355}
+  #player .pbar{
+    display:flex;align-items:center;gap:10px;padding:7px 12px;
+    background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);
+  }
+  #player .pbar button{
+    margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--dim);
+    border-radius:3px;padding:4px 11px;font-size:12.5px;cursor:pointer;
+  }
+  #player .pbar button:hover{border-color:var(--lamp);color:var(--lamp)}
+  #player .pbar a{color:var(--lamp)}
+  .streamhead{}
   .ticker{display:none}
 
   /* ---------- TV mode: ?tv=1 ---------- */
@@ -185,8 +208,9 @@
   body.tv.vid{overflow:hidden}
   body.tv.vid .stream{display:flex;flex-direction:column;height:100vh}
   body.tv.vid .streamhead{padding:1.6vh 3vw 1.2vh;flex:none}
-  body.tv.vid #player{display:block;flex:none;width:63vw;float:left}
+  body.tv.vid #player{display:block;position:static;flex:none;width:63vw;float:left}
   body.tv.vid #player .frame{padding-top:35.4vw}
+  body.tv.vid #player .pbar,body.tv.vid #player .poster{display:none}
   body.tv.vid #list{overflow:hidden;flex:1 1 auto}
   body.tv.vid .item{
     grid-template-columns:6vw 1fr;padding:1.4vh 2vw 1.4vh 0;
@@ -394,6 +418,7 @@ window.setTimeout(function(){
   </aside>
 
   <main class="stream">
+    <div id="player"></div>
     <div class="streamhead">
       <span class="count" id="count">—</span>
       <span class="meta" id="status">Loading…</span>
@@ -401,7 +426,6 @@ window.setTimeout(function(){
       <span class="meta" id="next" style="margin-left:auto"></span>
     </div>
     <div class="bar"><i id="prog"></i></div>
-    <div id="player"></div>
     <div id="list"></div>
     <div id="ticker" class="ticker"><div class="tickin" id="tickin"></div></div>
   </main>
@@ -613,7 +637,8 @@ function save(){
     localStorage.setItem(KEY, JSON.stringify({
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
-      video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay
+      video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
+      playing:state.playing, liveIds:state.liveIds, videoName:state.videoName
     }));
   }catch(e){}
 }
@@ -631,6 +656,9 @@ function restore(){
     if (s.chans) state.chans = s.chans;
     if (s.loc) state.loc = s.loc;
     if (s.myRelay){ state.myRelay = s.myRelay; $('#myrelay').value = s.myRelay; }
+    if (s.playing) state.playing = true;
+    if (s.liveIds) state.liveIds = s.liveIds;
+    if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
   }catch(e){}
 }
@@ -647,6 +675,10 @@ const state = {
   chans: {},             // '@handle' -> 'c:UC…', cached after first lookup
   loc: null,             // {lat, lon, city, region, zip, how}
   myRelay: '',           // user-hosted proxy, tried before all others
+  playing: false,        // video only loads once you press play
+  videoName: '',
+  liveIds: {},           // channel -> last resolved live video id
+  restoredY: 0,
   forecast: [],          // two always-present forecast rows
   restored: false,
   primed: false,         // suppress alerts on first load
@@ -711,6 +743,35 @@ function pdate(s){
   if (!isNaN(t)) return t;
   const m = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(s);
   return m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : NaN;
+}
+
+/* Coming back from an article reloads the page, which used to throw away
+   every story and start from an empty screen. The stream is cached so it
+   comes back instantly, then refreshes in the background. */
+function saveStream(){
+  try{
+    const rows = [...state.clusters.values()]
+      .sort(function(a,b){ return b.last - a.last; }).slice(0,180)
+      .map(function(c){
+        return {t:c.rep.title, l:c.rep.link, s:c.rep.source, k:c.rep.cat,
+                f:c.first, a:c.last, r:[...c.sources], g:[...c.cats], u:!!c.undated};
+      });
+    localStorage.setItem(KEY + '.stream', JSON.stringify({t:Date.now(), y:window.scrollY||0, rows:rows}));
+  }catch(e){}
+}
+function restoreStream(){
+  try{
+    const d = JSON.parse(localStorage.getItem(KEY + '.stream') || 'null');
+    if (!d || !d.rows || Date.now() - d.t > 6*HOUR) return;
+    d.rows.forEach(function(r){
+      state.clusters.set(++cid, {
+        id: cid, rep:{title:r.t, link:r.l, source:r.s, cat:r.k, time:r.f},
+        sig: sig(r.t), sources: new Set(r.r), first: r.f, last: r.a,
+        cats: new Set(r.g), undated: r.u, seen: true, alerted: true
+      });
+    });
+    state.restoredY = d.y || 0;
+  }catch(e){}
 }
 
 /* ============ story clustering ============
@@ -963,6 +1024,7 @@ async function loadAll(){
   fireAlerts();
   state.primed = true;
   draw();
+  saveStream();
 }
 
 /* ============ alerts ============ */
@@ -1010,6 +1072,9 @@ function fireAlerts(){
   }
 }
 window.addEventListener('focus', () => { state.unread = 0; document.title = 'Wire Desk'; });
+/* pagehide is the one iOS Safari reliably fires before it unloads you. */
+window.addEventListener('pagehide', saveStream);
+document.addEventListener('visibilitychange', function(){ if (document.hidden) saveStream(); });
 
 
 /* ============ location ============
@@ -1316,8 +1381,9 @@ async function currentLive(chanId){
   m = /watch\?v=([\w-]{11})/.exec(html);
   return m ? m[1] : '';
 }
-function setVideo(v){
+function setVideo(v, name){
   state.video = v;
+  if (name) state.videoName = name;
   const box = $('#player');
   if (!v){
     box.className = ''; box.innerHTML = '';
@@ -1325,25 +1391,49 @@ function setVideo(v){
     save(); draw(); return;
   }
   box.className = 'on';
-  const mount = function(src, link){
-    box.innerHTML = '<div class="frame"><iframe src="' + src + '" '
-      + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
-      + 'title="Live news stream"></iframe></div>'
-      + (link ? '<p class="hint" style="padding:6px 10px;margin:0">Not playing? '
-                + '<a href="' + link + '" target="_blank" rel="noopener" '
-                + 'style="color:#E8A33D">Open it on YouTube</a></p>' : '');
-  };
-  mount(videoSrc(v), v.indexOf('c:') === 0
+
+  const link = v.indexOf('c:') === 0
     ? 'https://www.youtube.com/channel/' + v.slice(2) + '/live'
-    : 'https://www.youtube.com/watch?v=' + v);
+    : 'https://www.youtube.com/watch?v=' + v;
+
+  const bar = function(src){
+    return '<div class="pbar"><span>' + esc(state.videoName || 'Live') + '</span>'
+      + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
+      + '<button id="pstop">Stop</button></div>';
+  };
+  const mount = function(src){
+    box.innerHTML = bar(src) + '<div class="frame"><iframe src="' + src + '" '
+      + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
+      + 'title="Live news stream"></iframe></div>';
+    const st = document.getElementById('pstop');
+    if (st) st.onclick = function(e){ e.preventDefault(); state.playing = false; save(); setVideo(v); };
+  };
+  /* Nothing loads until you ask it to. An iframe that never resolves is
+     worse than a button that plainly says "not started yet". */
+  const poster = function(){
+    box.innerHTML = '<div class="poster"><button id="pplay">\u25B6  Play '
+      + esc(state.videoName || 'live news') + '</button></div>';
+    const b = document.getElementById('pplay');
+    if (b) b.onclick = function(){ state.playing = true; save(); setVideo(v); };
+  };
+
+  if (!state.playing){ poster(); if (TV) document.body.classList.add('vid'); save(); draw(); return; }
+
+  /* Reuse the last stream ID we resolved for this channel, so returning to
+     the page doesn't depend on the relays answering all over again. */
+  const known = state.liveIds && state.liveIds[v];
+  mount(videoSrc(known || v));
 
   if (v.indexOf('c:') === 0){
     currentLive(v.slice(2)).then(function(id){
-      if (id && state.video === v) mount(videoSrc(id), 'https://www.youtube.com/watch?v=' + id);
-      else if (state.video === v) $('#vidnote').textContent =
+      if (id && state.video === v){
+        state.liveIds = state.liveIds || {};
+        if (state.liveIds[v] !== id){ state.liveIds[v] = id; save(); mount(videoSrc(id)); }
+      }
+      else if (state.video === v && !known) $('#vidnote').textContent =
         "Couldn't read the live stream — the relays are struggling. The Open on YouTube link under the player still works.";
     }).catch(function(){
-      if (state.video === v) $('#vidnote').textContent =
+      if (state.video === v && !known) $('#vidnote').textContent =
         "Couldn't read the live stream — set up your own relay (README) and this fixes itself.";
     });
   }
@@ -1462,8 +1552,8 @@ function drawCatalog(){
       if (!e) return;
       if (e.k === 'yt'){
         markChannel(null);
-        if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v); }
-        else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h]); }
+        if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
+        else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
         else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
         drawCatalog();
         return;
@@ -1751,7 +1841,7 @@ async function acceptVideo(input, label, cacheKey){
     if (ch){
       if (cacheKey){ state.chans[cacheKey] = ch; }
       note.textContent = (label || 'Channel') + ' locked in — it will follow their live stream from now on.';
-      setVideo(ch);
+      setVideo(ch, label);
       return;
     }
     throw new Error('no id');
@@ -1907,7 +1997,12 @@ if (TV){
 if (window.Notification && Notification.permission === 'granted'){
   $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
 }
+restoreStream();
 drawCats(); drawWatches(); drawMine(); drawCatalog(); drawSources();
+if (state.clusters.size){
+  draw();
+  if (state.restoredY) setTimeout(function(){ window.scrollTo(0, state.restoredY); }, 60);
+}
 if (state.video && !TV) setVideo(state.video);
 document.querySelectorAll('[data-vid]').forEach(b => {
   if (b.dataset.vid === state.video) b.setAttribute('aria-pressed','true');
