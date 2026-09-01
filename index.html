@@ -113,6 +113,8 @@
     background:var(--lamp);border-radius:2px;padding:1px 5px;margin-right:7px;font-weight:600}
   mark{background:rgba(232,163,61,.22);color:var(--lamp);padding:0 1px;border-radius:2px}
   .reads .head{font-size:17px;color:#C6D2DE}
+  .wx .head{font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.5;color:#B9C7D6}
+  .wx:hover .head{color:#DCE4ED}
 
   .state{padding:60px 26px;max-width:52ch}
   .state .lead{font-family:"Newsreader",serif;font-size:21px;margin:0 0 8px}
@@ -337,6 +339,7 @@ window.setTimeout(function(){
           <option value="mine" selected>My feeds</option>
           <option value="espanol">Español</option>
           <option value="local">Local</option>
+          <option value="state">State</option>
           <option value="wires">Wires</option>
           <option value="world">World</option>
           <option value="politics">Politics</option>
@@ -466,12 +469,12 @@ const GSITE = (site, hl, gl) =>
 
 const FEEDS = [
   /* ---- Rhode Island / southern New England ---- */
-  {id:'wpri',   name:'WPRI 12',            cat:'local', kind:'rss', url:'https://www.wpri.com/feed/'},
-  {id:'ricur',  name:'Rhode Island Current',cat:'local',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
-  {id:'projo',  name:'Providence Journal', cat:'local', kind:'rss', url:GN('site:providencejournal.com when:2d')},
-  {id:'pubrad', name:"The Public's Radio", cat:'local', kind:'rss', url:GN('site:thepublicsradio.org when:2d')},
-  {id:'ecori',  name:'WJAR / NBC 10',      cat:'local', kind:'rss', url:GN('site:turnto10.com when:2d')},
-  {id:'wbur',   name:'WBUR (Boston)',      cat:'local', kind:'rss', url:'https://www.wbur.org/rss/'},
+  {id:'wpri',   name:'WPRI 12',            cat:'state', kind:'rss', url:'https://www.wpri.com/feed/'},
+  {id:'ricur',  name:'Rhode Island Current',cat:'state',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
+  {id:'projo',  name:'Providence Journal', cat:'state', kind:'rss', url:GN('site:providencejournal.com when:2d')},
+  {id:'pubrad', name:"The Public's Radio", cat:'state', kind:'rss', url:GN('site:thepublicsradio.org when:2d')},
+  {id:'ecori',  name:'WJAR / NBC 10',      cat:'state', kind:'rss', url:GN('site:turnto10.com when:2d')},
+  {id:'wbur',   name:'WBUR (Boston)',      cat:'state', kind:'rss', url:'https://www.wbur.org/rss/'},
 
   /* ---- wires ---- */
   {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
@@ -516,6 +519,7 @@ const FEEDS = [
 
 const CATS = [
   {id:'local',   label:'Local'},
+  {id:'state',   label:'State'},
   {id:'wires',   label:'Wires'},
   {id:'world',   label:'World'},
   {id:'politics',label:'Politics'},
@@ -526,7 +530,7 @@ const CATS = [
   {id:'mine',    label:'My feeds'},
   {id:'search',  label:'Search'}
 ];
-const DEFAULT_ON = ['local','wires','world','politics','hazard','espanol','social','mine','search'];
+const DEFAULT_ON = ['local','state','wires','world','politics','hazard','espanol','social','mine','search'];
 
 /* ============ persistence (silently no-ops in sandboxed frames) ============ */
 const KEY = 'wiredesk.v2';
@@ -567,6 +571,7 @@ const state = {
   video: '',
   chans: {},   // '@handle' -> 'c:UC…', cached after first lookup
   loc: null,   // {lat, lon, city, region, zip, how}
+  forecast: [],// two always-present forecast rows
   primed: false,         // suppress alerts on first load
   unread: 0,
   timer:null, tick:null, due:0, loading:false
@@ -702,12 +707,13 @@ function add(o){
     best.last = Math.max(best.last, o.time);
     best.cats.add(o.cat);
     o.sig = s;
+    if (!o.undated) best.undated = false;
     if (o.time < best.first){ best.first = o.time; best.rep = o; }
     best.sig = new Set([...best.sig, ...s].slice(0,20));
     best.bumped = Date.now();
   } else {
     state.clusters.set(++cid, {
-      id: cid, rep: o, sig: s, sources: new Set([o.source]),
+      id: cid, rep: o, sig: s, sources: new Set([o.source]), undated: !!o.undated,
       first: o.time, last: o.time, cats: new Set([o.cat]),
       seen: false, alerted: false
     });
@@ -732,7 +738,11 @@ function parseRSS(xml, feed){
     if (!title) return;
     const link = (attr(el,'link','href') || txt(el,'link') || txt(el,'guid') || '').trim();
     const t = pdate(txt(el,'pubDate, published, updated, date'));
-    add({title, link, time:isNaN(t)?Date.now():t, source:feed.name, cat:feed.cat});
+    /* A feed with no usable date used to get stamped "now", which made
+       every one of its items look like breaking news and pinned that one
+       outlet to the top of the stream. Now it's marked instead. */
+    add({title, link, time: isNaN(t) ? Date.now() : t, undated: isNaN(t),
+         source:feed.name, cat:feed.cat});
     n++;
   });
   return n;
@@ -756,10 +766,12 @@ async function pullGDELT(feed, query){
   return arts.length;
 }
 
+const QUAKE_MIN = 4.0;   /* anything smaller is noise unless you're a seismologist */
 async function pullUSGS(feed){
-  const j = await (await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',{cache:'no-store'})).json();
+  const j = await (await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',{cache:'no-store'})).json();
   (j.features||[]).forEach(f=>{
     const p=f.properties;
+    if (!(p.mag >= QUAKE_MIN)) return;
     add({title:'M'+(p.mag===null||p.mag===undefined?'?':p.mag)+' earthquake — '+(p.place||'location pending'),
          link:p.url, time:p.time, source:'USGS', cat:feed.cat});
   });
@@ -931,8 +943,8 @@ function beep(){
     o.start(); o.stop(AC.currentTime + 0.2);
   }catch(e){}
 }
-function hot(c){ return c.sources.size >= 3 && (Date.now() - c.first) < HOUR; }
-function flagged(c){ const w = watchwords(); const t = c.rep.title.toLowerCase(); return w.some(x => t.includes(x)); }
+function hot(c){ return !c.wx && c.sources.size >= 3 && (Date.now() - c.first) < HOUR; }
+function flagged(c){ if (c.wx) return false; const w = watchwords(); const t = c.rep.title.toLowerCase(); return w.some(x => t.includes(x)); }
 
 function fireAlerts(){
   if (!state.primed) return;
@@ -958,6 +970,16 @@ window.addEventListener('focus', () => { state.unread = 0; document.title = 'Wir
    user types, or a rough guess from their IP. Whatever lands, it drives
    the local news query, the weather readout and point-based NWS alerts,
    so "local" means where you actually are. */
+const STATES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',
+CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',
+ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',
+MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',
+MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',
+NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',
+PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',
+TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',
+WI:'Wisconsin',WY:'Wyoming',PR:'Puerto Rico'};
+
 const WMO = {0:'Clear',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Freezing fog',
   51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',56:'Freezing drizzle',57:'Freezing drizzle',
   61:'Light rain',63:'Rain',65:'Heavy rain',66:'Freezing rain',67:'Freezing rain',
@@ -1005,7 +1027,7 @@ async function setLocation(L){
   if (!L.city || !L.forecast) await nameUSPoint(L);
   state.loc = L;
   drawLoc(); save();
-  loadWeather();
+  loadWeather(); loadForecast();
   const fresh = locFeeds();
   fresh.forEach(function(f){ pull(f).then(function(){ drawSources(); draw(); }); });
   drawSources();
@@ -1020,6 +1042,11 @@ function locFeeds(){
     const near = '"' + L.city + '"' + (L.region ? ' OR "' + L.city + ', ' + L.region + '"' : '');
     out.push({id:'loc-news', name: L.city + ' news', cat:'local', kind:'rss',
               url: GN(near + ' when:2d')});
+  }
+  const st = STATES[(L.region || '').toUpperCase()];
+  if (st){
+    out.push({id:'loc-state', name: st + ' news', cat:'state', kind:'rss',
+              url: GN('"' + st + '" when:2d')});
   }
   if (L.country === 'US'){
     out.push({id:'loc-alerts', name:'Alerts near you', cat:'local', kind:'nws',
@@ -1054,9 +1081,67 @@ function drawLoc(){
 /* Quiet auto-detect on first run. IP location is rough (often the town
    your ISP routes through), so GPS or a ZIP overrides it. */
 async function autoLocate(){
-  if (state.loc && state.loc.lat) { drawLoc(); loadWeather(); return; }
+  if (state.loc && state.loc.lat) { drawLoc(); loadWeather(); loadForecast(); return; }
   try{ await setLocation(await fromIP()); }
   catch(e){ drawLoc(); }
+}
+
+
+/* ============ forecast ============
+   Two forecast periods always ride in the stream as stories. They sit
+   outside the clustering pass on purpose: they're not news, they must
+   never merge with each other, and they must not be crowded out. */
+async function loadForecast(){
+  const L = state.loc;
+  if (!L || !L.lat){ state.forecast = []; return; }
+  const link = 'https://forecast.weather.gov/MapClick.php?lat=' + L.lat.toFixed(4) + '&lon=' + L.lon.toFixed(4);
+  const out = [];
+
+  /* NWS writes the forecast in plain English, so use it where it exists. */
+  if (L.forecast){
+    try{
+      const j = await (await timedFetch(L.forecast, 10000)).json();
+      const periods = dig(j, 'properties', 'periods') || [];
+      periods.slice(0, 2).forEach(function(pd){
+        out.push({
+          title: pd.name + ': ' + clip(pd.detailedForecast || pd.shortForecast || '', 240),
+          link: link, time: Date.now(),
+          source: 'Forecast \u00B7 ' + (L.city || 'NWS'), cat: 'local'
+        });
+      });
+    }catch(e){}
+  }
+
+  /* Outside NWS coverage, or if it failed, build the same two from Open-Meteo. */
+  if (!out.length){
+    try{
+      const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + L.lat.toFixed(3)
+        + '&longitude=' + L.lon.toFixed(3)
+        + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+        + '&temperature_unit=fahrenheit&timezone=auto&forecast_days=2';
+      const j = await (await timedFetch(u, 9000)).json();
+      const d = j.daily || {};
+      ['Today', 'Tomorrow'].forEach(function(label, i){
+        if (d.temperature_2m_max === undefined || d.temperature_2m_max[i] === undefined) return;
+        const rain = d.precipitation_probability_max ? d.precipitation_probability_max[i] : null;
+        out.push({
+          title: label + ': ' + (WMO[d.weather_code[i]] || 'Forecast')
+            + ', high ' + Math.round(d.temperature_2m_max[i])
+            + '\u00B0, low ' + Math.round(d.temperature_2m_min[i]) + '\u00B0'
+            + (rain !== null && rain !== undefined ? ', ' + rain + '% chance of precipitation' : ''),
+          link: link, time: Date.now(),
+          source: 'Forecast \u00B7 ' + (L.city || 'Open-Meteo'), cat: 'local'
+        });
+      });
+    }catch(e){}
+  }
+
+  state.forecast = out.map(function(o, i){
+    return {id: 'wx' + i, rep: o, sig: new Set(), sources: new Set([o.source]),
+            first: o.time, last: o.time, cats: new Set(['local']),
+            wx: true, undated: false, seen: true, alerted: true};
+  });
+  draw();
 }
 
 /* ============ TV display mode ============
@@ -1171,6 +1256,19 @@ function videoSrc(v){
     ? 'https://www.youtube.com/embed/live_stream?channel=' + v.slice(2) + '&' + common
     : 'https://www.youtube.com/embed/' + v + '?' + common;
 }
+
+/* YouTube's live_stream?channel= endpoint is old and frequently answers
+   with "Video unavailable" even when the channel is plainly streaming.
+   Reading the channel's own /live page for the current video ID and
+   embedding that directly is far more reliable — and since it re-runs on
+   every load, it still follows the stream through restarts. */
+async function currentLive(chanId){
+  const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
+  let m = /"videoId":"([\w-]{11})"/.exec(html);
+  if (m) return m[1];
+  m = /watch\?v=([\w-]{11})/.exec(html);
+  return m ? m[1] : '';
+}
 function setVideo(v){
   state.video = v;
   const box = $('#player');
@@ -1180,9 +1278,23 @@ function setVideo(v){
     save(); draw(); return;
   }
   box.className = 'on';
-  box.innerHTML = '<div class="frame"><iframe src="' + videoSrc(v) + '" '
-    + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
-    + 'title="Live news stream"></iframe></div>';
+  const mount = function(src, link){
+    box.innerHTML = '<div class="frame"><iframe src="' + src + '" '
+      + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
+      + 'title="Live news stream"></iframe></div>'
+      + (link ? '<p class="hint" style="padding:6px 10px;margin:0">Not playing? '
+                + '<a href="' + link + '" target="_blank" rel="noopener" '
+                + 'style="color:#E8A33D">Open it on YouTube</a></p>' : '');
+  };
+  mount(videoSrc(v), v.indexOf('c:') === 0
+    ? 'https://www.youtube.com/channel/' + v.slice(2) + '/live'
+    : 'https://www.youtube.com/watch?v=' + v);
+
+  if (v.indexOf('c:') === 0){
+    currentLive(v.slice(2)).then(function(id){
+      if (id && state.video === v) mount(videoSrc(id), 'https://www.youtube.com/watch?v=' + id);
+    }).catch(function(){});
+  }
   if (TV) document.body.classList.add('vid');
   save(); draw();
 }
@@ -1323,6 +1435,33 @@ function hashOf(str){
 }
 
 /* ============ rendering ============ */
+/* 0 = your town, 1 = your state, 2 = national, 3 = international. */
+function tierOf(c){
+  const t = c.cats;
+  if (t.has('local')) return 0;
+  if (t.has('state')) return 1;
+  if (t.has('world') || t.has('espanol')) return 3;
+  return 2;
+}
+const TIER_WEIGHT = [2.4, 1.7, 1.15, 0.45];
+
+/* Ranking pushes international down; this hard cap keeps it down.
+   Two international stories per 28 rows, placed at 14 and 28, with the
+   rest held back until the domestic stream runs dry. */
+function applyQuota(rows){
+  const BLOCK = 14;                 // one international slot per block
+  const intl = [], home = [];
+  rows.forEach(function(c){ (tierOf(c) === 3 ? intl : home).push(c); });
+  const out = [];
+  let h = 0, i = 0;
+  while (h < home.length){
+    for (let k = 0; k < BLOCK - 1 && h < home.length; k++) out.push(home[h++]);
+    if (i < intl.length) out.push(intl[i++]);
+  }
+  while (i < intl.length) out.push(intl[i++]);
+  return out;
+}
+
 function score(c){
   const hrs = (Date.now() - c.last)/HOUR;
   let s = 100/(1+hrs);                         // recency
@@ -1330,13 +1469,46 @@ function score(c){
   if (flagged(c)) s += 400;
   if (hot(c)) s += 200;
   if (c.cats.has('reads') && c.sources.size<2) s *= 0.35;   // reads never shout
+  s *= TIER_WEIGHT[tierOf(c)];                              // home first, world last
+  if (c.undated && c.sources.size < 2) s *= 0.35;           // its "now" is a guess, not a fact
   return s;
 }
 function visible(){
   const f = $('#filter').value.trim().toLowerCase();
   let out = [...state.clusters.values()].filter(c => [...c.cats].some(x => state.on.has(x)));
   if (f) out = out.filter(c => (c.rep.title+' '+[...c.sources].join(' ')).toLowerCase().includes(f));
-  return out.sort((a,b) => score(b) - score(a)).slice(0,250);
+  const ranked = applyQuota(diversify(out.sort((a,b) => score(b) - score(a)).slice(0,250)));
+
+  /* Slot the forecast in below the top two headlines — high enough to see
+     without scrolling, low enough that it never outranks breaking news.
+     Skipped while filtering, so a filter still means what it says. */
+  if (state.forecast.length && !f && state.on.has('local')){
+    return ranked.slice(0, 2).concat(state.forecast, ranked.slice(2));
+  }
+  return ranked;
+}
+
+/* Ranking alone lets one fast, prolific feed take ten slots in a row —
+   which is what "it's all Australia" looks like. This keeps the order
+   but allows any one outlet at most twice in any four consecutive rows,
+   pulling the next-best different source up instead. */
+function diversify(rows){
+  const CAP = 2, WINDOW = 4;
+  const pool = rows.slice(), out = [], recent = [];
+  while (pool.length){
+    let pick = 0;
+    for (let i = 0; i < pool.length; i++){
+      const src = pool[i].rep.source;
+      let seen = 0;
+      for (let j = 0; j < recent.length; j++) if (recent[j] === src) seen++;
+      if (seen < CAP){ pick = i; break; }
+    }
+    const c = pool.splice(pick, 1)[0];
+    out.push(c);
+    recent.push(c.rep.source);
+    if (recent.length > WINDOW) recent.shift();
+  }
+  return out;
 }
 function highlight(t, terms){
   let h = esc(t);
@@ -1372,8 +1544,8 @@ function draw(){
     const isFlag = flagged(c);
     const readOnly = c.cats.has('reads') && n < 2;
     const others = [...c.sources].slice(0,3).join(', ');
-    return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
-      <span class="age" style="--stripe:${stripe(c.last)}">${age(c.first)}</span>
+    return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''} ${c.wx?'wx':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
+      <span class="age" style="--stripe:${c.wx?'#3A4C60':stripe(c.last)}">${c.wx?'wx':age(c.first)}</span>
       <span>
         <span class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</span>
         <span class="sub">${ n>1
@@ -1671,6 +1843,8 @@ Object.keys(state.chans).forEach(h => {
 loadAll(); schedule(); autoLocate();
 setInterval(draw, 60000);
 setInterval(loadWeather, 900000);
+setInterval(loadForecast, 1800000);
+setInterval(function(){ if (state.video) setVideo(state.video); }, 1800000);
 window.__wireRan = true;
 </script>
 </body>
