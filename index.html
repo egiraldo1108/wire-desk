@@ -95,6 +95,36 @@
   .count{font-family:"Newsreader",serif;font-size:24px;font-weight:500}
   .streamhead .meta{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
 
+  #tabs{
+    display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    border-bottom:1px solid var(--line);background:var(--ink);
+    padding:0 20px;position:sticky;top:0;z-index:6;
+  }
+  #tabs::-webkit-scrollbar{display:none}
+  #tabs button{
+    background:none;border:none;border-bottom:2px solid transparent;
+    color:var(--dim);padding:11px 13px;font-size:13.5px;white-space:nowrap;cursor:pointer;
+  }
+  #tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--lamp)}
+  #tabs button:hover{color:var(--text)}
+  #tabs .badge{
+    display:inline-block;margin-left:6px;background:var(--lamp);color:#151A20;
+    border-radius:999px;padding:0 6px;font-size:11px;font-weight:600;
+    font-variant-numeric:tabular-nums;vertical-align:1px;
+  }
+  #tabs button[aria-selected=true] .badge{background:var(--lamp)}
+
+  .sec{
+    display:flex;align-items:baseline;gap:10px;
+    padding:20px 26px 8px;border-bottom:1px solid var(--line);
+  }
+  .sec h3{
+    margin:0;font-family:"Newsreader",Georgia,serif;font-weight:500;font-size:19px;
+  }
+  .sec .n{color:var(--dim);font-size:12.5px}
+  .sec .more{margin-left:auto;background:none;border:none;color:var(--lamp);
+    font-size:12.5px;cursor:pointer;padding:0}
+
   .item{display:grid;grid-template-columns:var(--gutter) 1fr;
     border-bottom:1px solid var(--line);padding:14px 26px 14px 0;align-items:start}
   .item:hover{background:#131C27}
@@ -143,6 +173,8 @@
     .rail.open{display:block}
     .rail .brand,.rail .tagline{display:none}
     .streamhead{padding:14px 16px 12px}
+    #tabs{padding:0 8px}
+    .sec{padding:16px 16px 6px}
     .item{grid-template-columns:58px 1fr;padding-right:16px}
     .age{padding-right:10px}
     .head{font-size:17px}
@@ -183,7 +215,7 @@
 
   /* ---------- TV mode: ?tv=1 ---------- */
   body.tv{overflow:hidden;font-size:20px}
-  body.tv .rail,body.tv .mobilebar,body.tv .bar{display:none}
+  body.tv .rail,body.tv .mobilebar,body.tv .bar,body.tv #tabs{display:none}
   body.tv .shell{grid-template-columns:1fr;display:block}
   body.tv .stream{padding:0}
   body.tv .streamhead{
@@ -431,6 +463,7 @@ window.setTimeout(function(){
       <span class="meta" id="next" style="margin-left:auto"></span>
     </div>
     <div class="bar"><i id="prog"></i></div>
+    <nav id="tabs" aria-label="Sections"></nav>
     <div id="list"></div>
     <div id="ticker" class="ticker"><div class="tickin" id="tickin"></div></div>
   </main>
@@ -656,7 +689,7 @@ function save(){
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
       playing:state.playing, liveIds:state.liveIds, videoName:state.videoName,
-      pinned:state.pinned
+      pinned:state.pinned, tab:state.tab, seen:state.seen
     }));
   }catch(e){}
 }
@@ -676,6 +709,8 @@ function restore(){
     if (s.myRelay){ state.myRelay = s.myRelay; $('#myrelay').value = s.myRelay; }
     if (s.playing) state.playing = true;
     if (s.pinned === false) state.pinned = false;
+    if (s.tab) state.tab = s.tab;
+    if (s.seen) state.seen = s.seen;
     if (s.liveIds) state.liveIds = s.liveIds;
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
@@ -699,6 +734,8 @@ const state = {
   videoName: '',
   liveIds: {},           // channel -> last resolved live video id
   restoredY: 0,
+  tab: 'all',            // active section tab
+  seen: {},              // tab id -> when you last opened it
   forecast: [],          // two always-present forecast rows
   restored: false,
   primed: false,         // suppress alerts on first load
@@ -1653,6 +1690,69 @@ function nextChannel(){
   drawCatalog();
 }
 
+/* ============ sections ============
+   Nine tabs over one stream. "All" is a digest — the four biggest stories
+   from each section — and each tab opens the full list for that section.
+   Badges count what has arrived since you last opened that tab. */
+const TABS = [
+  {id:'all',      label:'All',      cats:null},
+  {id:'t-local',  label:'Local',    cats:['local']},
+  {id:'t-state',  label:'State',    cats:['state']},
+  {id:'t-us',     label:'U.S.',     cats:['wires','hazard']},
+  {id:'t-pol',    label:'Politics', cats:['politics']},
+  {id:'t-world',  label:'World',    cats:['world','espanol']},
+  {id:'t-social', label:'Social',   cats:['social']},
+  {id:'t-reads',  label:'Reads',    cats:['reads']},
+  {id:'t-mine',   label:'Yours',    cats:['mine','search']}
+];
+const DIGEST_PER_SECTION = 4;
+
+function clustersFor(cats){
+  const f = $('#filter').value.trim().toLowerCase();
+  let out = [...state.clusters.values()].filter(function(c){
+    return [...c.cats].some(function(x){
+      return state.on.has(x) && (!cats || cats.indexOf(x) >= 0);
+    });
+  });
+  if (f) out = out.filter(function(c){
+    return (c.rep.title + ' ' + [...c.sources].join(' ')).toLowerCase().indexOf(f) >= 0;
+  });
+  out = out.sort(function(a,b){ return score(b) - score(a); });
+
+  /* forecast rides with Local, and only when nothing is being filtered */
+  if (!f && state.forecast.length && state.on.has('local') && (!cats || cats.indexOf('local') >= 0)){
+    out = state.forecast.concat(out);
+  }
+  return out;
+}
+
+function newCount(tab){
+  const since = (state.seen && state.seen[tab.id]) || 0;
+  if (!since) return 0;
+  return clustersFor(tab.cats).filter(function(c){ return !c.wx && c.first > since; }).length;
+}
+
+function drawTabs(){
+  $('#tabs').innerHTML = TABS.map(function(t){
+    const n = t.id === 'all' ? 0 : newCount(t);
+    return '<button data-tab="' + t.id + '" aria-selected="' + (state.tab === t.id) + '">'
+      + t.label + (n ? '<span class="badge">' + (n > 99 ? '99+' : n) + '</span>' : '') + '</button>';
+  }).join('');
+  $('#tabs').querySelectorAll('[data-tab]').forEach(function(b){
+    b.onclick = function(){ openTab(b.dataset.tab); };
+  });
+}
+
+function openTab(id){
+  state.tab = id;
+  state.seen = state.seen || {};
+  if (id !== 'all') state.seen[id] = Date.now();
+  else TABS.forEach(function(t){ if (t.id !== 'all') state.seen[t.id] = state.seen[t.id] || Date.now(); });
+  save();
+  drawTabs(); draw();
+  window.scrollTo(0, 0);
+}
+
 /* ============ rendering ============ */
 /* 0 = your town, 1 = your state, 2 = national, 3 = international. */
 function tierOf(c){
@@ -1737,16 +1837,66 @@ function highlight(t, terms){
   return h;
 }
 
-function draw(){
-  const rows = visible();
-  const terms = [$('#filter').value.trim(), ...watchwords()].filter(Boolean);
-  $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : '—';
+function rowHTML(c, terms){
+  const n = c.sources.size;
+  const isFlag = flagged(c);
+  const readOnly = c.cats.has('reads') && n < 2;
+  const others = [...c.sources].slice(0,3).join(', ');
+  return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''} ${c.wx?'wx':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
+      <span class="age" style="--stripe:${c.wx?'#3A4C60':stripe(c.last)}">${c.wx?'wx':age(c.first)}</span>
+      <span>
+        <span class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</span>
+        <span class="sub">${ n>1
+            ? `<span class="pickup">${n} outlets</span> · ${esc(others)}${n>3?' +'+(n-3):''}`
+            : `<span class="src">${esc(c.rep.source)}</span>${hostOf(c.rep.link)?' · '+esc(hostOf(c.rep.link)):''}` }</span>
+      </span></a>`;
+}
 
-  if (TV && rows.length){
-    if (state.video) drawTicker(rows);
-    drawTV(rows);
-    return;
+/* The digest: every section's top few, so one screen tells you what the
+   day looks like without committing to any one feed. */
+function drawDigest(terms){
+  let html = '', total = 0;
+  TABS.forEach(function(t){
+    if (t.id === 'all') return;
+    const rows = clustersFor(t.cats);
+    if (!rows.length) return;
+    const n = newCount(t);
+    total += rows.length;
+    html += '<div class="sec"><h3>' + t.label + '</h3>'
+         + '<span class="n">' + rows.length + (n ? ' · ' + n + ' new' : '') + '</span>'
+         + '<button class="more" data-open="' + t.id + '">See all \u203A</button></div>'
+         + rows.slice(0, DIGEST_PER_SECTION).map(function(c){ return rowHTML(c, terms); }).join('');
+  });
+  $('#list').innerHTML = html;
+  $('#list').querySelectorAll('[data-open]').forEach(function(b){
+    b.onclick = function(e){ e.preventDefault(); openTab(b.dataset.open); };
+  });
+  return total;
+}
+
+function draw(){
+  const terms = [$('#filter').value.trim(), ...watchwords()].filter(Boolean);
+  const tab = TABS.filter(function(t){ return t.id === state.tab; })[0] || TABS[0];
+
+  if (TV){
+    const rows = visible();
+    if (rows.length){
+      if (state.video) drawTicker(rows);
+      drawTV(rows);
+      return;
+    }
   }
+
+  drawTabs();
+
+  if (tab.id === 'all' && !$('#filter').value.trim()){
+    const total = drawDigest(terms);
+    $('#count').textContent = total ? total + (total===1?' story':' stories') : '—';
+    if (total) return;
+  }
+
+  const rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab.cats)).slice(0,200);
+  $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : '—';
 
   if (!rows.length){
     const dead = Object.values(state.health).filter(h=>!h.ok).length;
@@ -1758,20 +1908,7 @@ function draw(){
     return;
   }
 
-  $('#list').innerHTML = rows.map(c => {
-    const n = c.sources.size;
-    const isFlag = flagged(c);
-    const readOnly = c.cats.has('reads') && n < 2;
-    const others = [...c.sources].slice(0,3).join(', ');
-    return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''} ${c.wx?'wx':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
-      <span class="age" style="--stripe:${c.wx?'#3A4C60':stripe(c.last)}">${c.wx?'wx':age(c.first)}</span>
-      <span>
-        <span class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</span>
-        <span class="sub">${ n>1
-            ? `<span class="pickup">${n} outlets</span> · ${esc(others)}${n>3?' +'+(n-3):''}`
-            : `<span class="src">${esc(c.rep.source)}</span>${hostOf(c.rep.link)?' · '+esc(hostOf(c.rep.link)):''}` }</span>
-      </span></a>`;
-  }).join('');
+  $('#list').innerHTML = rows.map(function(c){ return rowHTML(c, terms); }).join('');
 }
 
 function drawSources(){
