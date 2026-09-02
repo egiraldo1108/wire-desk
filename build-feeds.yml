@@ -1,0 +1,43 @@
+name: Build feeds
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub queues cron jobs, so expect a few minutes
+    # of drift at busy times — this is not a real-time guarantee.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+  push:
+    branches: [main]
+    paths: ['index.html', 'scripts/build-feeds.js']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-feeds
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch feeds and resolve live channels
+        run: node scripts/build-feeds.js
+
+      - name: Commit feeds.json
+        run: |
+          git config user.name  "wire-desk-bot"
+          git config user.email "actions@github.com"
+          git add feeds.json live.json
+          if git diff --staged --quiet; then
+            echo "nothing changed"
+          else
+            git commit -m "feeds + live: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
