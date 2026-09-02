@@ -954,6 +954,42 @@ async function loadPrebuilt(){
   }catch(e){ /* not deployed yet — relays carry on as before */ }
 }
 
+/* Live channel IDs resolved by the GitHub Action. Same idea as the feeds:
+   the work happens where CORS doesn't exist, and the page just reads the
+   answer off its own domain. This is what removes the manual paste. */
+let LIVEMAP = null, LIVE_AT = 0;
+
+async function loadLiveMap(){
+  try{
+    const r = await fetch('./live.json?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.channels) return;
+    LIVEMAP = j.channels; LIVE_AT = j.built || 0;
+
+    /* Fold it into what the page already knows, so everything downstream
+       works unchanged — handles resolve instantly, streams play instantly. */
+    Object.keys(LIVEMAP).forEach(function(key){
+      const rec = LIVEMAP[key];
+      if (!rec || !rec.chan) return;
+      if (key.charAt(0) === '@') state.chans[key] = rec.chan;
+      if (rec.video){
+        state.liveIds = state.liveIds || {};
+        state.liveAt = state.liveAt || {};
+        state.liveIds[rec.chan] = rec.video;
+        state.liveAt[rec.chan] = LIVE_AT;
+      }
+    });
+    drawVidPicker();
+  }catch(e){ /* not deployed — the relay path still works */ }
+}
+
+function liveNow(entry){
+  if (!LIVEMAP) return null;
+  const rec = LIVEMAP[entry.v || entry.h];
+  return rec ? !!rec.live : null;
+}
+
 function prebuiltAge(){
   return PREBUILT_AT ? Math.round((Date.now() - PREBUILT_AT) / 60000) : null;
 }
@@ -1137,6 +1173,7 @@ async function loadAll(){
   tunePool();
   $('#status').textContent = 'Fetching…';
   await loadPrebuilt();
+  await loadLiveMap();
 
   const PRIORITY = ['local','state','wires','finance','hazard','search','politics','world','espanol','social','mine','reads'];
   const jobs = allFeeds()
@@ -1722,7 +1759,10 @@ function setVideo(v, name){
      the page doesn't depend on the relays answering all over again. */
   let known = state.liveIds && state.liveIds[v];
   const savedAt = (state.liveAt && state.liveAt[v]) || 0;
-  if (known && savedAt && Date.now() - savedAt > 12*HOUR) known = null;   // stale, re-resolve
+  const fromBuild = LIVEMAP && Object.keys(LIVEMAP).some(function(k){
+    return LIVEMAP[k].chan === v && LIVEMAP[k].video === known;
+  });
+  if (known && savedAt && !fromBuild && Date.now() - savedAt > 12*HOUR) known = null;
   mount(videoSrc(known || v));
 
   if (v.indexOf('c:') === 0){
@@ -2087,7 +2127,10 @@ function channelOptions(placeholder){
     groups[g].forEach(function(e){
       const key = e.v || e.h;
       const on = (e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video);
-      html += '<option value="' + esc(key) + '"' + (on ? ' selected' : '') + '>' + esc(e.n) + '</option>';
+      const lv = liveNow(e);
+      const mark = lv === true ? '\u25CF ' : (lv === false ? '\u25CB ' : '');
+      html += '<option value="' + esc(key) + '"' + (on ? ' selected' : '') + '>'
+           + mark + esc(e.n) + '</option>';
     });
     html += '</optgroup>';
   });
@@ -2673,6 +2716,7 @@ if (window.Notification && Notification.permission === 'granted'){
 }
 restoreStream();
 loadPrebuilt();
+loadLiveMap();
 drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawSources();
 if (state.clusters.size){
   draw();
