@@ -151,10 +151,34 @@ async function page(url) {
   } finally { clearTimeout(timer); }
 }
 
+/* Grabbing the first "channelId" in the HTML was wrong: a channel page is
+   full of them — recommended channels, sidebar videos, promoted content —
+   and the page's own id is rarely the first one. That's how NinjaTrader,
+   TraderTV and Smooth Trader all ended up pointing at somebody's church
+   stream. The canonical link is the page's own identity and nothing else's. */
 async function channelId(handleOrId) {
   if (/^UC[\w-]{20,}$/.test(handleOrId)) return handleOrId;
   const res = await page('https://www.youtube.com/' + handleOrId);
-  const m = /"(?:channelId|externalId)":"(UC[\w-]{20,})"/.exec(res.html);
+  const html = res.html || '';
+
+  let m = /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{20,})["']/i.exec(html);
+  if (m) return m[1];
+
+  m = /<meta[^>]+property=["']og:url["'][^>]+content=["']https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{20,})["']/i.exec(html);
+  if (m) return m[1];
+
+  /* channelMetadataRenderer describes the channel being viewed, unlike a
+     bare "channelId" which could belong to anything on the page. */
+  m = /"channelMetadataRenderer":\{[\s\S]{0,400}?"externalId":"(UC[\w-]{20,})"/.exec(html);
+  if (m) return m[1];
+
+  return '';
+}
+
+/* Read the channel's own name back, so a wrong match is visible in the log
+   instead of silently playing the wrong station. */
+function channelTitle(html) {
+  let m = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']{2,80})["']/i.exec(html || '');
   return m ? m[1] : '';
 }
 
@@ -172,14 +196,14 @@ async function liveVideo(id) {
      YouTube does not always include for a server — hence "0 live" while
      every channel was plainly broadcasting. */
   const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
-  if (redirected) return { id: redirected[1], live: true };
+  if (redirected) return { id: redirected[1], live: true, title: channelTitle(res.html) };
 
   if (res.html) {
     const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(res.html);
     const markers = /"isLiveNow"\s*:\s*true|"isLive"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"|"liveStreamability"/
                       .test(res.html);
     const m = /"videoId":"([\w-]{11})"/.exec(res.html);
-    if (m) return { id: m[1], live: markers && !offline };
+    if (m) return { id: m[1], live: markers && !offline, title: channelTitle(res.html) };
   }
   /* Deliberately no fallback to the newest upload. For a news channel that
      is almost always a short clip, and serving a clip in place of the live
@@ -187,6 +211,16 @@ async function liveVideo(id) {
      YouTube's own live_stream resolver instead. */
   return null;
 }
+
+/* Channel ids confirmed by hand. If a lookup disagrees with one of these,
+   the lookup is wrong and the entry is dropped rather than trusted. */
+const VERIFY = {
+  'c:UCoMdktPbSTixAyNGwb-UYkQ': 'UCoMdktPbSTixAyNGwb-UYkQ',
+  'c:UCNye-wNBqNL5ZzHSJj3l8Bg': 'UCNye-wNBqNL5ZzHSJj3l8Bg',
+  'c:UCzG5BnqHO8oNlrPDW9CYJog': 'UCzG5BnqHO8oNlrPDW9CYJog',
+  'c:UCknLrEdhRCp1aegoMqRaCZg': 'UCknLrEdhRCp1aegoMqRaCZg',
+  'c:UCQfwfsi5VrQ8yKZ-UWmAEFg': 'UCQfwfsi5VrQ8yKZ-UWmAEFg'
+};
 
 async function buildLive() {
   const src = fs.readFileSync(HTML, 'utf8');
@@ -205,13 +239,17 @@ async function buildLive() {
       try {
         const cid = await channelId(raw);
         if (!cid) { console.log(`  ${e.n}: could not resolve channel id (consent wall?)`); return; }
+        if (VERIFY[key] && VERIFY[key] !== cid) {
+          console.log(`  ${e.n}: resolved ${cid} but expected ${VERIFY[key]} — skipping`);
+          return;
+        }
         const vid = await liveVideo(cid);
         if (!vid) { console.log(`  ${e.n}: resolved ${cid}, but not streaming`);
           out[key] = { chan: 'c:' + cid, video: '', live: false, name: e.n };
           return; }
         out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, name: e.n };
         if (vid.live) live++;
-        console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'idle'} ${vid.id}`);
+        console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'idle'} ${vid.id}  [${cid}${vid.title ? ' = ' + vid.title : ''}]`);
       } catch (err) {
         console.log(`  ${e.n}: ${err.message}`);
       }
