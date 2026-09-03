@@ -158,11 +158,11 @@ async function liveVideo(id) {
     let m = /"videoId":"([\w-]{11})"/.exec(html);
     if (m) return { id: m[1], live: isLive };
   }
-  /* Not streaming, or the page was withheld — fall back to the channel's
-     RSS feed, whose newest entry is the most recent upload or stream. */
-  const xml = await page('https://www.youtube.com/feeds/videos.xml?channel_id=' + id);
-  const m = /<yt:videoId>([\w-]{11})<\/yt:videoId>/.exec(xml);
-  return m ? { id: m[1], live: false } : null;
+  /* Deliberately no fallback to the newest upload. For a news channel that
+     is almost always a short clip, and serving a clip in place of the live
+     feed is worse than serving nothing — the page can fall back to
+     YouTube's own live_stream resolver instead. */
+  return null;
 }
 
 async function buildLive() {
@@ -184,7 +184,7 @@ async function buildLive() {
         if (!cid) { console.log(`  ${e.n}: no channel id`); return; }
         const vid = await liveVideo(cid);
         if (!vid) { console.log(`  ${e.n}: nothing found`); return; }
-        out[key] = { chan: 'c:' + cid, video: vid.id, live: vid.live, name: e.n };
+        out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, name: e.n };
         if (vid.live) live++;
         console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'idle'} ${vid.id}`);
       } catch (err) {
