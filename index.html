@@ -389,6 +389,7 @@ window.setTimeout(function(){
       <select id="vidpick" style="width:100%;margin-top:8px" aria-label="Pick a live channel"></select>
       <button class="btn" id="vidoff" style="margin-top:6px">Turn video off</button>
       <p class="hint" id="vidnote" style="min-height:1em"></p>
+      <div id="mychans" style="margin-top:8px"></div>
       <details>
         <summary>Getting a link for any channel</summary>
         <p>Open the channel on YouTube, click its live stream, copy the address bar. Works with <code>watch?v=…</code>, <code>youtu.be/…</code>, <code>/live/…</code>, or a <code>/channel/UC…</code> URL — a channel link auto-follows whatever they're streaming right now, so it never goes stale. Free 24/7 news channels: Sky News, DW News, France 24 English, ABC News Live, CBS News, NBC News NOW, LiveNOW from FOX, Bloomberg.</p>
@@ -734,7 +735,7 @@ function save(){
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
       playing:state.playing, liveIds:state.liveIds, liveAt:state.liveAt, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:3
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:3, myChannels:state.myChannels
     }));
   }catch(e){}
 }
@@ -757,6 +758,7 @@ function restore(){
     if (s.tab) state.tab = s.tab;
     if (s.seen) state.seen = s.seen;
     if (s.bskyOk) state.bskyOk = s.bskyOk;
+    if (s.myChannels) state.myChannels = s.myChannels;
     /* Ids saved before the live-only fix may be clips rather than streams,
        so they're dropped once. */
     if (s.vfix === 3){
@@ -785,6 +787,7 @@ const state = {
   videoName: '',
   liveIds: {},           // channel -> last resolved live video id
   liveAt: {},            // and when that was resolved
+  myChannels: [],        // channels you pasted in yourself
   restoredY: 0,
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
@@ -914,7 +917,7 @@ function add(o){
   for (const c of state.clusters.values()){
     if (Math.abs(c.first - o.time) > 36*HOUR) continue;
     const {hit, j} = overlap(s, c.sig);
-    if (hit >= 2 && j >= 0.42 && j > bestJ){ best = c; bestJ = j; }
+    if (hit >= 2 && j >= 0.36 && j > bestJ){ best = c; bestJ = j; }
   }
 
   if (best){
@@ -1009,9 +1012,17 @@ function parseRSS(xml, feed){
      empty feed. That's an answer, not an error. */
   if (!nodes.length) return 0;
   let n = 0;
+  const fromGN = (feed.url || '').indexOf('news.google.com') >= 0;
   nodes.slice(0,40).forEach(el => {
-    const title = strip(txt(el,'title'));
+    let title = strip(txt(el,'title'));
     if (!title) return;
+    /* Google News tacks the publisher onto every headline — "Headline - CNN".
+       Left in, the same story from five outlets looks like five different
+       headlines and never clusters. */
+    if (fromGN){
+      const cut = /^(.{20,}?)\s+-\s+([^-]{2,40})$/.exec(title);
+      if (cut) title = cut[1].trim();
+    }
     const link = (attr(el,'link','href') || txt(el,'link') || txt(el,'guid') || '').trim();
     const t = pdate(txt(el,'pubDate, published, updated, date'));
     /* A feed with no usable date used to get stamped "now", which made
@@ -2151,9 +2162,39 @@ function openTab(id){
   window.scrollTo(0, 0);
 }
 
+/* Channels you paste in are kept alongside the built-in ones, so a feed
+   you found once is in the dropdown from then on. */
+function rememberChannel(key, name){
+  state.myChannels = state.myChannels || [];
+  if (state.myChannels.some(function(c){ return c.v === key; })) return;
+  state.myChannels.push({n: (name || 'Saved channel').slice(0,40), v: key, r: 'Yours', k: 'yt', l: 'en'});
+  save();
+  drawVidPicker(); drawMyChannels();
+}
+function allChannels(){
+  return CATALOG.filter(function(e){ return e.k === 'yt'; }).concat(state.myChannels || []);
+}
+function drawMyChannels(){
+  const box = $('#mychans');
+  if (!box) return;
+  const list = state.myChannels || [];
+  box.innerHTML = list.length
+    ? list.map(function(c){
+        return '<div class="entry"><span class="label">' + esc(c.n) + '</span>'
+          + '<button class="kill" data-ch="' + esc(c.v) + '" aria-label="Remove">\u00D7</button></div>';
+      }).join('')
+    : '<p class="hint" style="margin:0">Paste a YouTube channel above and it is saved here.</p>';
+  box.querySelectorAll('[data-ch]').forEach(function(b){
+    b.onclick = function(){
+      state.myChannels = (state.myChannels || []).filter(function(c){ return c.v !== b.dataset.ch; });
+      save(); drawMyChannels(); drawVidPicker();
+    };
+  });
+}
+
 function channelOptions(placeholder){
   const groups = {};
-  CATALOG.filter(function(e){ return e.k === 'yt'; }).forEach(function(e){
+  allChannels().forEach(function(e){
     (groups[e.r] = groups[e.r] || []).push(e);
   });
   let html = '<option value="">' + esc(placeholder || '\u2014 pick a channel \u2014') + '</option>';
@@ -2175,7 +2216,7 @@ function channelOptions(placeholder){
 /* Every channel picker — rail, player bar, poster — runs through here. */
 function pickChannel(key){
   if (!key) return;
-  const e = CATALOG.filter(function(x){ return x.k === 'yt' && (x.v === key || x.h === key); })[0];
+  const e = allChannels().filter(function(x){ return x.v === key || x.h === key; })[0];
   if (!e) return;
   state.playing = true;
   markChannel(null);
@@ -2312,11 +2353,23 @@ function rowHTML(c, terms){
 
 /* The digest: every section's top few, so one screen tells you what the
    day looks like without committing to any one feed. */
+/* A story tagged wires + politics used to headline both sections, so the
+   digest showed the same thing three times. Each story now belongs to the
+   first section that claims it, in tab order. */
+function primaryTab(c){
+  for (let i = 1; i < TABS.length; i++){
+    if (TABS[i].match && TABS[i].match(c)) return TABS[i].id;
+  }
+  return null;
+}
+
 function drawDigest(terms){
   let html = '', total = 0;
   TABS.forEach(function(t){
     if (t.id === 'all') return;
-    const rows = clustersFor(t);
+    const rows = clustersFor(t).filter(function(c){
+      return c.wx || primaryTab(c) === t.id;
+    });
     if (!rows.length) return;
     const n = newCount(t);
     total += rows.length;
@@ -2553,7 +2606,12 @@ async function acceptVideoInner(raw, label, cacheKey){
   note.textContent = 'Finding the channel…';
 
   const parsed = parseVideo(raw);
-  if (parsed.indexOf('c:') === 0){ note.textContent = ''; setVideo(parsed); return; }
+  if (parsed.indexOf('c:') === 0){
+    note.textContent = '';
+    if (!cacheKey) rememberChannel(parsed, label || 'Saved channel');
+    setVideo(parsed, label);
+    return;
+  }
 
   /* an @handle, /c/ or /user/ URL has no ID in it — read the page for one */
   const looksLikeChannelPage = /youtube\.com\/(@|c\/|user\/)/i.test(raw);
@@ -2568,7 +2626,8 @@ async function acceptVideoInner(raw, label, cacheKey){
     const ch = await resolveChannel(lookupUrl);
     if (ch){
       if (cacheKey){ state.chans[cacheKey] = ch; }
-      note.textContent = (label || 'Channel') + ' locked in — it will follow their live stream from now on.';
+      if (!cacheKey) rememberChannel(ch, label || raw);
+      note.textContent = (label || 'Channel') + ' saved — it is in the channel list now.';
       setVideo(ch, label);
       return;
     }
@@ -2576,6 +2635,7 @@ async function acceptVideoInner(raw, label, cacheKey){
   }catch(e){
     if (parsed){
       note.textContent = 'Using that one stream. It will stop working when they restart it — paste their channel link instead for a permanent one.';
+      rememberChannel(parsed, label || 'Saved stream');
       setVideo(parsed);
     } else {
       note.textContent = "Couldn't read that channel. Try their /channel/UC… link.";
@@ -2752,7 +2812,7 @@ if (window.Notification && Notification.permission === 'granted'){
 restoreStream();
 loadPrebuilt();
 loadLiveMap();
-drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawSources();
+drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawMyChannels(); drawSources();
 if (state.clusters.size){
   draw();
   if (state.restoredY) setTimeout(function(){ window.scrollTo(0, state.restoredY); }, 60);
