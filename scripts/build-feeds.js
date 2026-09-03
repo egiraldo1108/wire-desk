@@ -144,29 +144,42 @@ async function page(url) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
     });
-    return r.ok ? await r.text() : '';
+    if (!r.ok) return { html: '', url: '' };
+    return { html: await r.text(), url: r.url || url };
   } catch (e) {
-    return '';
+    return { html: '', url: '' };
   } finally { clearTimeout(timer); }
 }
 
 async function channelId(handleOrId) {
   if (/^UC[\w-]{20,}$/.test(handleOrId)) return handleOrId;
-  const html = await page('https://www.youtube.com/' + handleOrId);
-  const m = /"(?:channelId|externalId)":"(UC[\w-]{20,})"/.exec(html);
+  const res = await page('https://www.youtube.com/' + handleOrId);
+  const m = /"(?:channelId|externalId)":"(UC[\w-]{20,})"/.exec(res.html);
   return m ? m[1] : '';
 }
 
 async function liveVideo(id) {
-  let html = await page('https://www.youtube.com/channel/' + id + '/live');
-  if (html && !/"videoId"/.test(html)) {
+  const url = 'https://www.youtube.com/channel/' + id + '/live';
+  let res = await page(url);
+  if (res.html && !/"videoId"/.test(res.html)) {
     await new Promise(r => setTimeout(r, 1200));
-    html = await page('https://www.youtube.com/channel/' + id + '/live');   // one retry
+    res = await page(url);                                   // one retry
   }
-  if (html) {
-    const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
-    let m = /"videoId":"([\w-]{11})"/.exec(html);
-    if (m) return { id: m[1], live: isLive };
+
+  /* The strongest signal is the redirect itself: when a channel is on air,
+     /live sends you to /watch?v=<the stream>. When it isn't, you stay on a
+     channel page. Earlier I was hunting for markers inside the HTML, which
+     YouTube does not always include for a server — hence "0 live" while
+     every channel was plainly broadcasting. */
+  const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
+  if (redirected) return { id: redirected[1], live: true };
+
+  if (res.html) {
+    const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(res.html);
+    const markers = /"isLiveNow"\s*:\s*true|"isLive"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"|"liveStreamability"/
+                      .test(res.html);
+    const m = /"videoId":"([\w-]{11})"/.exec(res.html);
+    if (m) return { id: m[1], live: markers && !offline };
   }
   /* Deliberately no fallback to the newest upload. For a news channel that
      is almost always a short clip, and serving a clip in place of the live
