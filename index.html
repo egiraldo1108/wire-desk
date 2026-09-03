@@ -947,7 +947,7 @@ let PREBUILT = null, PREBUILT_AT = 0;
 
 async function loadPrebuilt(){
   try{
-    const r = await fetch('./feeds.json?t=' + Date.now(), {cache:'no-store'});
+    const r = await timedFetch('./feeds.json?t=' + Date.now(), 9000);
     if (!r.ok) return;
     const j = await r.json();
     if (j && j.items){ PREBUILT = j.items; PREBUILT_AT = j.built || 0; }
@@ -961,7 +961,7 @@ let LIVEMAP = null, LIVE_AT = 0;
 
 async function loadLiveMap(){
   try{
-    const r = await fetch('./live.json?t=' + Date.now(), {cache:'no-store'});
+    const r = await timedFetch('./live.json?t=' + Date.now(), 9000);
     if (!r.ok) return;
     const j = await r.json();
     if (!j || !j.channels) return;
@@ -1036,7 +1036,7 @@ async function pullGDELT(feed, query){
   const q = encodeURIComponent(query || feed.query || 'breaking');
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artlist&maxrecords=40&sort=datedesc&format=json`;
   let j;
-  try{ j = await (await fetch(url,{cache:'no-store'})).json(); }
+  try{ j = await (await timedFetch(url, 12000)).json(); }
   catch(e){ j = JSON.parse(await relayFetch(url)); }
   const arts = j.articles || [];
   arts.forEach(a => {
@@ -1051,7 +1051,7 @@ async function pullGDELT(feed, query){
 
 const QUAKE_MIN = 4.0;   /* anything smaller is noise unless you're a seismologist */
 async function pullUSGS(feed){
-  const j = await (await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',{cache:'no-store'})).json();
+  const j = await (await timedFetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson', 12000)).json();
   (j.features||[]).forEach(f=>{
     const p=f.properties;
     if (!(p.mag >= QUAKE_MIN)) return;
@@ -1065,7 +1065,7 @@ async function pullNWS(feed){
   let url = 'https://api.weather.gov/alerts/active?limit=40';
   if (feed.point) url += '&point=' + feed.point;
   else if (feed.area) url += '&area=' + feed.area;
-  const j = await (await fetch(url,{cache:'no-store',headers:{'Accept':'application/geo+json'}})).json();
+  const j = await (await timedFetch(url, 12000)).json();
   (j.features||[]).forEach(f=>{
     const p=f.properties;
     add({title:`${p.event} — ${(p.areaDesc||'').split(';')[0]}`,
@@ -1076,7 +1076,7 @@ async function pullNWS(feed){
 }
 
 async function pullHN(feed){
-  const j = await (await fetch('https://hn.algolia.com/api/v1/search?tags=front_page',{cache:'no-store'})).json();
+  const j = await (await timedFetch('https://hn.algolia.com/api/v1/search?tags=front_page', 12000)).json();
   (j.hits||[]).forEach(h=>{
     add({title:h.title, link:h.url||`https://news.ycombinator.com/item?id=${h.objectID}`,
          time:pdate(h.created_at)||Date.now(), source:'Hacker News', cat:feed.cat});
@@ -1087,7 +1087,7 @@ async function pullHN(feed){
 /* ============ social ============ */
 async function bskySearch(term, label){
   const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(term)}&limit=25&sort=latest`;
-  const j = await (await fetch(url,{cache:'no-store'})).json();
+  const j = await (await timedFetch(url, 12000)).json();
   const posts = j.posts||[];
   posts.forEach(p=>{
     const body = strip(dig(p,'record','text')||''); if (!body) return;
@@ -1100,7 +1100,7 @@ async function bskySearch(term, label){
 }
 async function bskyAuthor(handle, cat){
   const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=25`;
-  const j = await (await fetch(url,{cache:'no-store'})).json();
+  const j = await (await timedFetch(url, 12000)).json();
   const feed = j.feed||[];
   feed.forEach(f=>{
     const p=f.post, body=strip(dig(p,'record','text')||''); if (!body) return;
@@ -1114,7 +1114,7 @@ async function bskyAuthor(handle, cat){
 async function mastoTag(tag){
   const url = `${MASTODON}/api/v1/timelines/tag/${encodeURIComponent(tag)}?limit=25`;
   let arr;
-  try{ arr = await (await fetch(url,{cache:'no-store'})).json(); }
+  try{ arr = await (await timedFetch(url, 12000)).json(); }
   catch(e){ arr = JSON.parse(await relayFetch(url)); }
   if (!Array.isArray(arr)) throw new Error('bad response');
   arr.forEach(s=>{
@@ -1133,8 +1133,14 @@ async function pullWatch(w){
   if (w.kind === 'user') jobs.push(bskyAuthor(w.v.replace(/^@/,''), w.cat));
   if (w.kind === 'tag'){ jobs.push(bskySearch('#'+w.v, '#'+w.v+' · Bluesky'), mastoTag(w.v), redditSearch(w.v)); }
   if (w.kind === 'term'){ jobs.push(bskySearch(w.v, `"${w.v}" · Bluesky`), redditSearch(w.v)); }
-  let n=0, wins=0;
-  for (const p of jobs){ try{ n += (await p)||0; wins++; }catch(e){} }
+  /* These used to run one after another, so a handful of watched accounts
+     could hold the whole refresh open for minutes. */
+  const settled = await Promise.all(jobs.map(function(p){
+    return p.then(function(v){ return {ok:true, n:v||0}; },
+                  function(){ return {ok:false, n:0}; });
+  }));
+  const n = settled.reduce(function(a,r){ return a + r.n; }, 0);
+  const wins = settled.filter(function(r){ return r.ok; }).length;
   state.health['w:'+w.v] = {ok: wins>0, n};
 }
 
@@ -1196,7 +1202,10 @@ async function loadAll(){
     runs.push(pullGDELT({cat:'search'}, state.query).catch(()=>{}).finally(()=>{ done++; step(); }));
   }
 
-  await Promise.all(runs);
+  /* Belt and braces: however badly the network behaves, the cycle ends.
+     A refresh that never finishes is worse than one that finishes short. */
+  const ceiling = new Promise(function(res){ setTimeout(res, 60000); });
+  await Promise.race([Promise.all(runs), ceiling]);
 
   /* One quiet retry for whatever failed — by now the queue is empty and
      a different relay is at the front, so throttled feeds usually land. */
@@ -1204,7 +1213,10 @@ async function loadAll(){
   if (failed.length){
     $('#status').textContent = 'Retrying ' + failed.length + '…';
     relayCursor++;
-    await Promise.all(failed.map(f => pull(f)));
+    await Promise.race([
+      Promise.all(failed.map(f => pull(f))),
+      new Promise(function(res){ setTimeout(res, 30000); })
+    ]);
     drawSources();
   }
 
@@ -1755,6 +1767,22 @@ function setVideo(v, name){
     save(); draw(); return;
   }
 
+  /* A failed lookup must never take down a player that is already running.
+     The live_stream embed needs no relay whatsoever — the lookup is only
+     ever an upgrade on top of it, so a failure just leaves things as they
+     were and offers a manual fix. */
+  const softFail = function(){
+    $('#vidnote').textContent = '';
+    const bar2 = box.querySelector('.pbar');
+    if (bar2 && !document.getElementById('pfix')){
+      const b = document.createElement('button');
+      b.id = 'pfix';
+      b.textContent = 'Fix stream';
+      b.onclick = function(e){ e.preventDefault(); capture('Set this stream by hand:'); };
+      bar2.appendChild(b);
+    }
+  };
+
   /* Reuse the last stream ID we resolved for this channel, so returning to
      the page doesn't depend on the relays answering all over again. */
   let known = state.liveIds && state.liveIds[v];
@@ -1776,10 +1804,9 @@ function setVideo(v, name){
           save(); mount(videoSrc(id));
         }
       }
-      else if (state.video === v && !known)
-        capture("Couldn't find the current stream automatically.");
+      else if (state.video === v && !known) softFail();
     }).catch(function(){
-      if (state.video === v && !known) capture('The proxies are down, so the lookup failed.');
+      if (state.video === v && !known) softFail();
     });
   }
   if (TV) document.body.classList.add('vid');
@@ -1851,8 +1878,8 @@ const CATALOG = [
   {n:'Sky News',            r:'UK',        l:'en', k:'yt', v:'c:UCoMdktPbSTixAyNGwb-UYkQ'},
   {n:'Al Jazeera English',  r:'Qatar',     l:'en', k:'yt', v:'c:UCNye-wNBqNL5ZzHSJj3l8Bg'},
   {n:'Sky News Español',    r:'UK',        l:'es', k:'yt', v:'c:UCzG5BnqHO8oNlrPDW9CYJog'},
-  {n:'DW News',             r:'Germany',   l:'en', k:'yt', h:'@dwnews'},
-  {n:'France 24 English',   r:'France',    l:'en', k:'yt', h:'@FRANCE24English'},
+  {n:'DW News',             r:'Germany',   l:'en', k:'yt', v:'c:UCknLrEdhRCp1aegoMqRaCZg'},
+  {n:'France 24 English',   r:'France',    l:'en', k:'yt', v:'c:UCQfwfsi5VrQ8yKZ-UWmAEFg'},
   {n:'ABC News Live',       r:'USA',       l:'en', k:'yt', h:'@ABCNews'},
   {n:'NBC News NOW',        r:'USA',       l:'en', k:'yt', h:'@NBCNews'},
   {n:'CBS News',            r:'USA',       l:'en', k:'yt', h:'@CBSNews'},
