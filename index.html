@@ -734,7 +734,7 @@ function save(){
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
       playing:state.playing, liveIds:state.liveIds, liveAt:state.liveAt, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:3
     }));
   }catch(e){}
 }
@@ -757,8 +757,12 @@ function restore(){
     if (s.tab) state.tab = s.tab;
     if (s.seen) state.seen = s.seen;
     if (s.bskyOk) state.bskyOk = s.bskyOk;
-    if (s.liveIds) state.liveIds = s.liveIds;
-    if (s.liveAt) state.liveAt = s.liveAt;
+    /* Ids saved before the live-only fix may be clips rather than streams,
+       so they're dropped once. */
+    if (s.vfix === 3){
+      if (s.liveIds) state.liveIds = s.liveIds;
+      if (s.liveAt) state.liveAt = s.liveAt;
+    }
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
   }catch(e){}
@@ -973,7 +977,9 @@ async function loadLiveMap(){
       const rec = LIVEMAP[key];
       if (!rec || !rec.chan) return;
       if (key.charAt(0) === '@') state.chans[key] = rec.chan;
-      if (rec.video){
+      /* Only a confirmed live broadcast is worth pinning to. Anything else
+         falls through to YouTube's own live_stream resolver. */
+      if (rec.video && rec.live){
         state.liveIds = state.liveIds || {};
         state.liveAt = state.liveAt || {};
         state.liveIds[rec.chan] = rec.video;
@@ -1623,26 +1629,21 @@ function videoSrc(v){
    Reading the channel's own /live page for the current video ID and
    embedding that directly is far more reliable — and since it re-runs on
    every load, it still follows the stream through restarts. */
+/* Returns a video id ONLY when that video is genuinely broadcasting live.
+   The earlier version fell back to the channel's newest upload, which for a
+   news channel is nearly always a two-minute clip — that's why several
+   channels were playing videos instead of the live feed. A wrong stream is
+   worse than none, so this now returns nothing rather than guessing. */
 async function currentLive(chanId){
-  /* 1. the channel's own /live page names the stream it's running now */
   try{
     const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
+    const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
+    if (!isLive) return '';                 // channel isn't streaming right now
     let m = /"videoId":"([\w-]{11})"/.exec(html);
     if (m) return m[1];
     m = /watch\?v=([\w-]{11})/.exec(html);
     if (m) return m[1];
   }catch(e){}
-
-  /* 2. YouTube publishes a plain RSS feed of every channel's recent uploads.
-        It's far smaller than the live page and often gets through when the
-        page doesn't — for a 24/7 news channel the newest entry is usually
-        the current stream. */
-  try{
-    const xml = await relayFetch('https://www.youtube.com/feeds/videos.xml?channel_id=' + chanId);
-    const m = /<yt:videoId>([\w-]{11})<\/yt:videoId>/.exec(xml);
-    if (m) return m[1];
-  }catch(e){}
-
   return '';
 }
 function setVideo(v, name){
@@ -1804,7 +1805,14 @@ function setVideo(v, name){
           save(); mount(videoSrc(id));
         }
       }
-      else if (state.video === v && !known) softFail();
+      else if (state.video === v && !known){
+        const entry = CATALOG.filter(function(x){
+          return x.k === 'yt' && (x.v === v || state.chans[x.h] === v);
+        })[0];
+        if (entry && liveNow(entry) === false)
+          $('#vidnote').textContent = (entry.n || 'That channel') + " isn't broadcasting live right now.";
+        softFail();
+      }
     }).catch(function(){
       if (state.video === v && !known) softFail();
     });
