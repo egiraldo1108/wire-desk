@@ -195,13 +195,25 @@ async function liveVideo(id) {
      channel page. Earlier I was hunting for markers inside the HTML, which
      YouTube does not always include for a server — hence "0 live" while
      every channel was plainly broadcasting. */
+  /* A redirect alone is not proof. When a channel is NOT streaming, YouTube
+     often bounces /live to somebody else's recommended live video — which is
+     how Bloomberg's stream and a Democracy Now video ended up standing in for
+     half the list. The stream has to belong to the channel we asked for. */
   const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
-  if (redirected) return { id: redirected[1], live: true, title: channelTitle(res.html) };
+  if (redirected) {
+    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(res.html || '');
+    if (owner && owner[1] !== id) {
+      return null;                       // somebody else's stream, discard
+    }
+    if (owner) return { id: redirected[1], live: true, title: channelTitle(res.html) };
+  }
 
   if (res.html) {
     const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(res.html);
     const markers = /"isLiveNow"\s*:\s*true|"isLive"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"|"liveStreamability"/
                       .test(res.html);
+    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(res.html);
+    if (owner && owner[1] !== id) return null;          // not this channel's video
     const m = /"videoId":"([\w-]{11})"/.exec(res.html);
     if (m) return { id: m[1], live: markers && !offline, title: channelTitle(res.html) };
   }
@@ -221,6 +233,28 @@ const VERIFY = {
   'c:UCknLrEdhRCp1aegoMqRaCZg': 'UCknLrEdhRCp1aegoMqRaCZg',
   'c:UCQfwfsi5VrQ8yKZ-UWmAEFg': 'UCQfwfsi5VrQ8yKZ-UWmAEFg'
 };
+
+/* Loose name comparison: "NinjaTrader" vs "NinjaTrader", "Smooth Trader TV"
+   vs "SmoothTraderTV". Enough to catch a completely wrong channel without
+   tripping over punctuation and spacing. */
+function norm(x) {
+  return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function nameMatches(expected, actual) {
+  const a = norm(expected), b = norm(actual);
+  if (!a || !b) return true;                  // nothing to compare, don't block
+  if (a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return true;
+  const tokens = String(expected).toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 4);
+  return tokens.some(t => b.indexOf(t) >= 0);
+}
+
+/* The channel's own RSS feed states its title. Cheap, and it can't be
+   confused by anything else on a rendered page. */
+async function channelName(id) {
+  const res = await page('https://www.youtube.com/feeds/videos.xml?channel_id=' + id);
+  const m = /<title>([^<]{1,80})<\/title>/.exec(res.html || '');
+  return m ? m[1].trim() : '';
+}
 
 async function buildLive() {
   const src = fs.readFileSync(HTML, 'utf8');
@@ -243,8 +277,14 @@ async function buildLive() {
           console.log(`  ${e.n}: resolved ${cid} but expected ${VERIFY[key]} — skipping`);
           return;
         }
+        /* Guard against resolving to an unrelated channel entirely. */
+        const realName = await channelName(cid);
+        if (realName && !nameMatches(e.n, realName)) {
+          console.log(`  ${e.n}: resolved to "${realName}" (${cid}) — wrong channel, skipping`);
+          return;
+        }
         const vid = await liveVideo(cid);
-        if (!vid) { console.log(`  ${e.n}: resolved ${cid}, but not streaming`);
+        if (!vid) { console.log(`  ${e.n}: ${realName || cid} — not streaming`);
           out[key] = { chan: 'c:' + cid, video: '', live: false, name: e.n };
           return; }
         out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, name: e.n };
