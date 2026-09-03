@@ -27,6 +27,8 @@
     font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
   button,input,select{font:inherit;color:inherit}
+  /* D-pad navigation on a TV needs a visible focus ring, and older
+     browsers don't know :focus-visible — so plain :focus is the base. */
   a:focus,button:focus,input:focus,select:focus{outline:2px solid var(--lamp);outline-offset:2px}
   :focus-visible{outline:2px solid var(--lamp);outline-offset:2px;border-radius:2px}
 
@@ -184,17 +186,17 @@
     .item{grid-template-columns:58px 1fr;padding-right:16px}
     .age{padding-right:10px}
     .head{font-size:17px}
-    input[type=text],input[type=url]{font-size:16px}
+    input[type=text],input[type=url]{font-size:16px}  /* stops iOS zoom-on-focus */
     select{font-size:16px}
   }
-
+  /* ---------- live video ---------- */
   #player{display:none;background:#000}
   #player.on{display:block;position:sticky;top:0;z-index:9}
   #player.on.unpinned{position:static}
   #player.on.shut{position:static;background:transparent}
   #player .frame{position:relative;width:100%;
-    padding-top:56.25%;
-    padding-top:min(56.25%,34vh);
+    padding-top:56.25%;              /* fallback for older browsers */
+    padding-top:min(56.25%,34vh);    /* keep it from eating the screen */
   }
   #player iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}
   #player .poster{
@@ -237,11 +239,12 @@
   @media (max-width:480px){
     #player .pbar{gap:7px;padding:6px 9px}
     #player .pbar button{padding:4px 8px;font-size:12px}
-    #player .pbarsel{font-size:16px;max-width:46%}
+    #player .pbarsel{font-size:16px;max-width:46%}   /* 16px stops iOS zooming */
   }
   .streamhead{}
   .ticker{display:none}
 
+  /* ---------- TV mode: ?tv=1 ---------- */
   body.tv{overflow:hidden;font-size:20px}
   body.tv .rail,body.tv .mobilebar,body.tv .bar,body.tv #tabs{display:none}
   body.tv .shell{grid-template-columns:1fr;display:block}
@@ -265,6 +268,7 @@
   body.tv .state{padding:12vh 6vw;max-width:none}
   body.tv .state .lead{font-size:3vw}
   body.tv .state .why{font-size:1.6vw}
+  /* video board: player left, headlines right, ticker along the bottom */
   body.tv.vid{overflow:hidden}
   body.tv.vid .stream{display:flex;flex-direction:column;height:100vh}
   body.tv.vid .streamhead{padding:1.6vh 3vw 1.2vh;flex:none}
@@ -300,6 +304,9 @@
 </head>
 <body>
 <script>
+/* Deliberately ES5 — this must parse even where the main script cannot.
+   If the main script dies on a syntax error nothing else would ever run,
+   and you would stare at a blank screen with no way to tell why. */
 window.setTimeout(function(){
   if (!window.__wireRan){
     var el = document.getElementById('tooold');
@@ -498,6 +505,16 @@ window.setTimeout(function(){
 </div>
 
 <script>
+/* ============================================================
+   Wire Desk — live event monitor, single file, no server.
+   Tuned for: Rhode Island local + world breaking + politics,
+   with slower "reads" kept in their own lane.
+
+   Core idea: headlines are grouped into stories. Six outlets
+   running the same thing in ten minutes IS the signal, so the
+   pickup count drives sort order and alerts.
+   ============================================================ */
+
 const RELAYS = [
   {n:'allorigins',  u: x => `https://api.allorigins.win/raw?url=${encodeURIComponent(x)}`},
   {n:'codetabs',    u: x => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(x)}`},
@@ -505,13 +522,25 @@ const RELAYS = [
   {n:'allorigins2', u: x => `https://api.allorigins.win/get?url=${encodeURIComponent(x)}`,
    unwrap: t => JSON.parse(t).contents}
 ];
+/* Removed: corsproxy.io (now answers 401 without a paid key),
+   whateverorigin (http-only, so an https page can't touch it),
+   thingproxy, cors.eu.org and test.cors.workers.dev (all dead).
+   Four working relays beat nine where five burn your retries. */
 
+/* Each relay gets its own small queue rather than one shared one.
+   A single global cap of three meant forty feeds crawled through a
+   three-wide door; nine relays at three apiece is up to 27 in flight
+   while still never hammering any one proxy. */
+/* Three at a time per relay is polite when several are up. When only one
+   is answering, politeness just means a two-minute load, so it widens. */
 let PER_RELAY = 3;
 function tunePool(){
   const up = activeRelays().filter(function(r){ return !(r.fails >= 3 && r.wins === 0); }).length;
   PER_RELAY = up <= 1 ? 6 : (up === 2 ? 4 : 3);
 }
 
+/* A relay you host yourself is the only one that never throttles.
+   Paste a Cloudflare Worker URL in the rail and it takes priority. */
 function activeRelays(){
   if (state.myRelay){
     const mine = {n:'yours', u: x => state.myRelay + (state.myRelay.indexOf('?') < 0 ? '?url=' : '&url=') + encodeURIComponent(x),
@@ -532,6 +561,10 @@ function acquire(r){
   });
 }
 
+/* Order by measured speed, not just pass/fail. Two working relays can
+   differ eightfold — 360ms versus 2900ms — and always reaching for the
+   slow one wastes most of the load time. Untested relays get an
+   optimistic default so they still get a chance to prove themselves. */
 function relayOrder(){
   const all = activeRelays();
   const live = all.filter(function(r){ return !(r.fails >= 3 && r.wins === 0); });
@@ -539,11 +572,13 @@ function relayOrder(){
   return pool.slice().sort(function(a, b){ return cost(a) - cost(b); });
 }
 function cost(r){
-  return (r.ms || 1200) + r.busy * 600 + r.fails * 1500;
+  return (r.ms || 1200)          // measured latency, or an optimistic guess
+       + r.busy * 600            // already loaded up? let someone else go
+       + r.fails * 1500;         // recent failures push it down the list
 }
 function noteWin(r, dt){
   r.wins++;
-  r.ms = r.ms ? Math.round(r.ms * 0.7 + dt * 0.3) : dt;
+  r.ms = r.ms ? Math.round(r.ms * 0.7 + dt * 0.3) : dt;   // rolling average
 }
 
 function timedFetch(url, ms){
@@ -555,12 +590,15 @@ function timedFetch(url, ms){
           function(e){ clearTimeout(timer); throw e; });
 }
 
-const CACHE = new Map(), CACHE_MS = 240000;
+/* Short-lived cache: a redraw or a second category touching the same
+   feed shouldn't cost another round trip. */
+const CACHE = new Map(), CACHE_MS = 240000;   // 4 min — just under the refresh interval
 
 async function relayFetch(url){
   const hit = CACHE.get(url);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
 
+  /* Feeds that send CORS headers need no middleman and no queue slot. */
   try{
     const r = await timedFetch(url, 5000);
     if (r.ok){
@@ -571,6 +609,8 @@ async function relayFetch(url){
 
   let last;
   const order = relayOrder();
+  /* Walk the whole list. Capping at four meant a request could spend
+     every attempt on dead proxies and never reach a working one. */
   for (let i = 0; i < order.length; i++){
     const relay = order[i];
     const release = await acquire(relay);
@@ -592,15 +632,26 @@ async function relayFetch(url){
   throw last || new Error('every relay failed');
 }
 
+/* Mastodon server used for public hashtag reads. Any public instance
+   works — swap for mstdn.social, mas.to, etc. */
 const MASTODON = 'https://mastodon.social';
+
+/* Sky News' channel ID, verified. The out-of-the-box stream, so video
+   works on first open with nothing to paste. Channel IDs never change,
+   and YouTube resolves the current live stream itself on every load. */
 const DEFAULT_VIDEO = 'c:UCoMdktPbSTixAyNGwb-UYkQ';
 
 const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+
+/* Google News publishes a top-stories feed for every country and language
+   it covers. One endpoint, always valid — far safer than guessing each
+   outlet's own RSS path, especially abroad. */
 const GTOP = (hl, gl) => `https://news.google.com/rss?hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
 const GSITE = (site, hl, gl) =>
   `https://news.google.com/rss/search?q=${encodeURIComponent('site:'+site+' when:2d')}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
 
 const FEEDS = [
+  /* ---- state / southern New England ---- */
   {id:'wpri',   name:'WPRI 12',            cat:'state', kind:'rss', url:'https://www.wpri.com/feed/'},
   {id:'ricur',  name:'Rhode Island Current',cat:'state',kind:'rss', url:'https://rhodeislandcurrent.com/feed/'},
   {id:'projo',  name:'Providence Journal', cat:'state', kind:'rss', url:GN('site:providencejournal.com when:2d')},
@@ -608,12 +659,14 @@ const FEEDS = [
   {id:'ecori',  name:'WJAR / NBC 10',      cat:'state', kind:'rss', url:GN('site:turnto10.com when:2d')},
   {id:'wbur',   name:'WBUR (Boston)',      cat:'state', kind:'rss', url:'https://www.wbur.org/rss/'},
 
+  /* ---- wires ---- */
   {id:'gnbreak',name:'Breaking (Google News)',cat:'wires',kind:'rss',url:GN('breaking when:6h')},
   {id:'reuters',name:'Reuters',            cat:'wires', kind:'rss', url:GN('site:reuters.com when:1d')},
   {id:'ap',     name:'AP',                 cat:'wires', kind:'rss', url:GN('site:apnews.com when:1d')},
   {id:'ustop',  name:'U.S. top stories',   cat:'wires', kind:'rss', url:GTOP('en-US','US')},
   {id:'usnat',  name:'U.S. national',      cat:'wires', kind:'rss', url:GN('"United States" news when:1d')},
 
+  /* ---- world ---- */
   {id:'bbc',    name:'BBC World',          cat:'world', kind:'rss', url:'https://feeds.bbci.co.uk/news/world/rss.xml'},
   {id:'npr',    name:'NPR',                cat:'world', kind:'rss', url:'https://feeds.npr.org/1001/rss.xml'},
   {id:'guard',  name:'Guardian World',     cat:'world', kind:'rss', url:'https://www.theguardian.com/world/rss'},
@@ -623,6 +676,7 @@ const FEEDS = [
   {id:'cbc',    name:'CBC World',          cat:'world', kind:'rss', url:'https://www.cbc.ca/webfeed/rss/rss-world'},
   {id:'gdelt',  name:'GDELT global index', cat:'world', kind:'gdelt', query:'breaking'},
 
+  /* ---- politics: deliberately spread across the spectrum ---- */
   {id:'nprpol', name:'NPR Politics',       cat:'politics', kind:'rss', url:'https://feeds.npr.org/1014/rss.xml'},
   {id:'hill',   name:'The Hill',           cat:'politics', kind:'rss', url:'https://thehill.com/news/feed/'},
   {id:'politico',name:'Politico',          cat:'politics', kind:'rss', url:'https://rss.politico.com/politics-news.xml'},
@@ -632,6 +686,8 @@ const FEEDS = [
   {id:'rcp',    name:'RealClearPolitics',  cat:'politics', kind:'rss', url:'https://www.realclearpolitics.com/index.xml'},
   {id:'elect',  name:'Elections watch',    cat:'politics', kind:'rss', url:GN('election OR "vote count" OR primary OR ballot when:1d')},
 
+  /* ---- hazards ---- */
+  /* ---- finance ---- */
   {id:'cnbc',   name:'CNBC',               cat:'finance', kind:'rss', url:'https://www.cnbc.com/id/100003114/device/rss/rss.html'},
   {id:'mktw',   name:'MarketWatch',        cat:'finance', kind:'rss', url:'https://feeds.marketwatch.com/marketwatch/topstories/'},
   {id:'yfin',   name:'Yahoo Finance',      cat:'finance', kind:'rss', url:'https://finance.yahoo.com/news/rssindex'},
@@ -642,6 +698,7 @@ const FEEDS = [
   {id:'usgs',   name:'USGS earthquakes',   cat:'hazard', kind:'usgs'},
   {id:'nws',    name:'US weather alerts',  cat:'hazard', kind:'nws'},
 
+  /* ---- slow lane: things worth reading, not watching ---- */
   {id:'hn',     name:'Hacker News',        cat:'reads', kind:'hn'},
   {id:'atl',    name:'The Atlantic',       cat:'reads', kind:'rss', url:'https://www.theatlantic.com/feed/all/'},
   {id:'aeon',   name:'Aeon',               cat:'reads', kind:'rss', url:'https://aeon.co/feed.rss'},
@@ -669,6 +726,7 @@ const CATS = [
 ];
 const DEFAULT_ON = ['local','state','wires','world','politics','finance','hazard','espanol','social','mine','search'];
 
+/* ============ persistence (silently no-ops in sandboxed frames) ============ */
 const KEY = 'wiredesk.v2';
 function save(){
   try{
@@ -701,6 +759,8 @@ function restore(){
     if (s.seen) state.seen = s.seen;
     if (s.bskyOk) state.bskyOk = s.bskyOk;
     if (s.myChannels) state.myChannels = s.myChannels;
+    /* Ids saved before the live-only fix may be clips rather than streams,
+       so they're dropped once. */
     if (s.vfix === 3){
       if (s.liveIds) state.liveIds = s.liveIds;
       if (s.liveAt) state.liveAt = s.liveAt;
@@ -710,36 +770,42 @@ function restore(){
   }catch(e){}
 }
 
+/* ============ state ============ */
 const state = {
-  clusters: new Map(),
+  clusters: new Map(),   // id -> cluster
   health: {},
-  watches: [],
+  watches: [],           // [{kind:'tag'|'user'|'term', v:'wildfire'}]
   custom: [],
   on: new Set(DEFAULT_ON),
   query: '',
   video: '',
-  chans: {},
-  loc: null,
-  myRelay: '',
-  playing: false,
-  pinned: true,
+  chans: {},             // '@handle' -> 'c:UC…', cached after first lookup
+  loc: null,             // {lat, lon, city, region, zip, how}
+  myRelay: '',           // user-hosted proxy, tried before all others
+  playing: false,        // video only loads once you press play
+  pinned: true,          // sticky player, toggled from the bar
   videoName: '',
-  liveIds: {},
-  liveAt: {},
-  myChannels: [],
+  liveIds: {},           // channel -> last resolved live video id
+  liveAt: {},            // and when that was resolved
+  myChannels: [],        // channels you pasted in yourself
   restoredY: 0,
-  tab: 'all',
-  seen: {},
-  bskyOk: {},
+  tab: 'all',            // active section tab
+  seen: {},              // tab id -> when you last opened it
+  bskyOk: {},            // handle -> does it exist
   bskyChecked: false,
   resolving: false,
-  forecast: [],
+  forecast: [],          // two always-present forecast rows
   restored: false,
-  primed: false,
+  primed: false,         // suppress alerts on first load
   unread: 0,
   timer:null, tick:null, due:0, loading:false
 };
 
+/* ============ helpers ============ */
+
+/* Older Samsung/Tizen browsers predate ?. and ?? — these helpers keep the
+   whole file parseable on 2017-2020 TV firmware. A syntax error there is a
+   blank screen with no way to debug it, so it's worth the verbosity. */
 function txt(el, sel){
   var n = el.querySelector(sel);
   return n ? (n.textContent || '') : '';
@@ -779,6 +845,8 @@ function stripe(ms){
 const watchwords = () => $('#watch').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
 function hostOf(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return ''; } }
 
+/* Safari rejects several date shapes Chrome accepts. Try progressively
+   looser forms before giving up and calling it "now". */
 function pdate(s){
   if (!s) return NaN;
   s = s.trim();
@@ -792,6 +860,9 @@ function pdate(s){
   return m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]) : NaN;
 }
 
+/* Coming back from an article reloads the page, which used to throw away
+   every story and start from an empty screen. The stream is cached so it
+   comes back instantly, then refreshes in the background. */
 function saveStream(){
   try{
     const rows = [...state.clusters.values()]
@@ -818,6 +889,10 @@ function restoreStream(){
   }catch(e){}
 }
 
+/* ============ story clustering ============
+   Two headlines belong to the same story if their significant
+   words overlap enough. That lets us count pickups: one outlet
+   is a report, five outlets in an hour is an event. */
 const STOP = new Set(('the a an of in on to for and with as at by from is are was were after over says say new '+
   'amid its his her their you your how why what will can could would has have had but not more than about '+
   'first last two three into out up down off between during against under while may might').split(' '));
@@ -836,7 +911,7 @@ let cid = 0;
 function add(o){
   if (!o.title) return;
   const s = sig(o.title);
-  if (s.size < 2) return;
+  if (s.size < 2) return;                       // too thin to cluster safely
 
   let best = null, bestJ = 0;
   for (const c of state.clusters.values()){
@@ -846,7 +921,7 @@ function add(o){
   }
 
   if (best){
-    if (best.sources.has(o.source)) return;
+    if (best.sources.has(o.source)) return;     // same outlet re-listing
     best.sources.add(o.source);
     best.last = Math.max(best.last, o.time);
     best.cats.add(o.cat);
@@ -864,11 +939,17 @@ function add(o){
   }
 }
 
+/* drop anything older than 48h so memory stays flat */
 function prune(){
   const cut = Date.now() - 48*HOUR;
   for (const [k,c] of state.clusters) if (c.last < cut) state.clusters.delete(k);
 }
 
+/* ============ prebuilt feeds ============
+   A GitHub Action fetches every feed on GitHub's servers — where CORS
+   does not exist — and commits the result as feeds.json. The page reads
+   that from its own domain, so there is no permission check, no proxy
+   and nothing to rate-limit. Relays become the fallback, not the path. */
 let PREBUILT = null, PREBUILT_AT = 0;
 
 async function loadPrebuilt(){
@@ -877,9 +958,12 @@ async function loadPrebuilt(){
     if (!r.ok) return;
     const j = await r.json();
     if (j && j.items){ PREBUILT = j.items; PREBUILT_AT = j.built || 0; }
-  }catch(e){}
+  }catch(e){ /* not deployed yet — relays carry on as before */ }
 }
 
+/* Live channel IDs resolved by the GitHub Action. Same idea as the feeds:
+   the work happens where CORS doesn't exist, and the page just reads the
+   answer off its own domain. This is what removes the manual paste. */
 let LIVEMAP = null, LIVE_AT = 0;
 
 async function loadLiveMap(){
@@ -890,10 +974,14 @@ async function loadLiveMap(){
     if (!j || !j.channels) return;
     LIVEMAP = j.channels; LIVE_AT = j.built || 0;
 
+    /* Fold it into what the page already knows, so everything downstream
+       works unchanged — handles resolve instantly, streams play instantly. */
     Object.keys(LIVEMAP).forEach(function(key){
       const rec = LIVEMAP[key];
       if (!rec || !rec.chan) return;
       if (key.charAt(0) === '@') state.chans[key] = rec.chan;
+      /* Only a confirmed live broadcast is worth pinning to. Anything else
+         falls through to YouTube's own live_stream resolver. */
       if (rec.video && rec.live){
         state.liveIds = state.liveIds || {};
         state.liveAt = state.liveAt || {};
@@ -902,7 +990,7 @@ async function loadLiveMap(){
       }
     });
     drawVidPicker();
-  }catch(e){}
+  }catch(e){ /* not deployed — the relay path still works */ }
 }
 
 function liveNow(entry){
@@ -915,22 +1003,31 @@ function prebuiltAge(){
   return PREBUILT_AT ? Math.round((Date.now() - PREBUILT_AT) / 60000) : null;
 }
 
+/* ============ parsers ============ */
 function parseRSS(xml, feed){
   const doc = new DOMParser().parseFromString(xml,'text/xml');
   if (doc.querySelector('parsererror')) throw new Error('not a valid feed');
   const nodes = [...doc.querySelectorAll('item, entry')];
+  /* A site: query with nothing published in the window returns a valid,
+     empty feed. That's an answer, not an error. */
   if (!nodes.length) return 0;
   let n = 0;
   const fromGN = (feed.url || '').indexOf('news.google.com') >= 0;
   nodes.slice(0,40).forEach(el => {
     let title = strip(txt(el,'title'));
     if (!title) return;
+    /* Google News tacks the publisher onto every headline — "Headline - CNN".
+       Left in, the same story from five outlets looks like five different
+       headlines and never clusters. */
     if (fromGN){
       const cut = /^(.{20,}?)\s+-\s+([^-]{2,40})$/.exec(title);
       if (cut) title = cut[1].trim();
     }
     const link = (attr(el,'link','href') || txt(el,'link') || txt(el,'guid') || '').trim();
     const t = pdate(txt(el,'pubDate, published, updated, date'));
+    /* A feed with no usable date used to get stamped "now", which made
+       every one of its items look like breaking news and pinned that one
+       outlet to the top of the stream. Now it's marked instead. */
     add({title, link, time: isNaN(t) ? Date.now() : t, undated: isNaN(t),
          source:feed.name, cat:feed.cat});
     n++;
@@ -938,6 +1035,7 @@ function parseRSS(xml, feed){
   return n;
 }
 async function pullRSS(f){
+  /* Prebuilt first: no network permission needed, no relay, no queue. */
   const pre = PREBUILT && PREBUILT[f.url];
   if (pre && pre.length){
     pre.forEach(function(it){
@@ -968,7 +1066,7 @@ async function pullGDELT(feed, query){
   return arts.length;
 }
 
-const QUAKE_MIN = 4.0;
+const QUAKE_MIN = 4.0;   /* anything smaller is noise unless you're a seismologist */
 async function pullUSGS(feed){
   const j = await (await timedFetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson', 12000)).json();
   (j.features||[]).forEach(f=>{
@@ -1003,6 +1101,7 @@ async function pullHN(feed){
   return (j.hits||[]).length;
 }
 
+/* ============ social ============ */
 async function bskySearch(term, label){
   const url = `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(term)}&limit=25&sort=latest`;
   const j = await (await timedFetch(url, 12000)).json();
@@ -1051,6 +1150,8 @@ async function pullWatch(w){
   if (w.kind === 'user') jobs.push(bskyAuthor(w.v.replace(/^@/,''), w.cat));
   if (w.kind === 'tag'){ jobs.push(bskySearch('#'+w.v, '#'+w.v+' · Bluesky'), mastoTag(w.v), redditSearch(w.v)); }
   if (w.kind === 'term'){ jobs.push(bskySearch(w.v, `"${w.v}" · Bluesky`), redditSearch(w.v)); }
+  /* These used to run one after another, so a handful of watched accounts
+     could hold the whole refresh open for minutes. */
   const settled = await Promise.all(jobs.map(function(p){
     return p.then(function(v){ return {ok:true, n:v||0}; },
                   function(){ return {ok:false, n:0}; });
@@ -1060,6 +1161,7 @@ async function pullWatch(w){
   state.health['w:'+w.v] = {ok: wins>0, n};
 }
 
+/* ============ orchestration ============ */
 async function pull(feed){
   try{
     let n=0;
@@ -1080,6 +1182,9 @@ async function searchWires(q){
   catch(e){ state.health.nsearch={ok:false}; }
 }
 
+/* How often each category is worth re-fetching. On one slow relay the
+   difference between 45 requests a cycle and 20 is the difference between
+   a usable page and a spinner. */
 const CADENCE = {local:1, state:1, wires:1, hazard:1, search:1, finance:1,
                  politics:2, world:2, espanol:2, social:2, mine:2, reads:3};
 let cycle = 0;
@@ -1100,6 +1205,7 @@ async function loadAll(){
               || cycle % (CADENCE[f.cat] || 1) === 0
               || !state.health[f.id])
     .sort((a,b) => PRIORITY.indexOf(a.cat) - PRIORITY.indexOf(b.cat));
+  /* a watch filed under State should load when State is on, not Social */
   const watches = state.watches.filter(function(w){ return state.on.has(w.cat || 'social'); });
   const total = jobs.length + watches.length + (state.query?2:0) || 1;
 
@@ -1113,12 +1219,17 @@ async function loadAll(){
     runs.push(pullGDELT({cat:'search'}, state.query).catch(()=>{}).finally(()=>{ done++; step(); }));
   }
 
+  /* Belt and braces: however badly the network behaves, the cycle ends.
+     A refresh that never finishes is worse than one that finishes short. */
   const ceiling = new Promise(function(res){ setTimeout(res, 60000); });
   await Promise.race([Promise.all(runs), ceiling]);
 
+  /* One quiet retry for whatever failed — by now the queue is empty and
+     a different relay is at the front, so throttled feeds usually land. */
   const failed = jobs.filter(f => state.health[f.id] && !state.health[f.id].ok);
   if (failed.length){
     $('#status').textContent = 'Retrying ' + failed.length + '…';
+    relayCursor++;
     await Promise.race([
       Promise.all(failed.map(f => pull(f))),
       new Promise(function(res){ setTimeout(res, 30000); })
@@ -1143,6 +1254,9 @@ async function loadAll(){
   saveStream();
 }
 
+/* ============ alerts ============ */
+/* iOS will not let a page make sound until the user has tapped it,
+   so the audio context is created and resumed on first interaction. */
 let AC = null;
 function unlockAudio(){
   try{
@@ -1185,9 +1299,16 @@ function fireAlerts(){
   }
 }
 window.addEventListener('focus', () => { state.unread = 0; document.title = 'Wire Desk'; });
+/* pagehide is the one iOS Safari reliably fires before it unloads you. */
 window.addEventListener('pagehide', saveStream);
 document.addEventListener('visibilitychange', function(){ if (document.hidden) saveStream(); });
 
+
+/* ============ location ============
+   Three ways in, in order of accuracy: the device's own GPS, a ZIP the
+   user types, or a rough guess from their IP. Whatever lands, it drives
+   the local news query, the weather readout and point-based NWS alerts,
+   so "local" means where you actually are. */
 const STATES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',
 CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',
 ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',
@@ -1227,6 +1348,9 @@ function fromGPS(){
       {timeout: 12000, maximumAge: 600000});
   });
 }
+/* Resolve the county name, so a town too small to make headlines still
+   has a local feed worth reading. North Smithfield rarely appears in
+   Google News; Providence County constantly does. */
 async function countyName(url){
   try{
     const j = await (await timedFetch(url, 8000)).json();
@@ -1235,6 +1359,7 @@ async function countyName(url){
   }catch(e){ return ''; }
 }
 
+/* NWS knows the city, county and forecast zone for any US point. */
 async function nameUSPoint(L){
   try{
     const j = await (await timedFetch('https://api.weather.gov/points/' + L.lat.toFixed(4) + ',' + L.lon.toFixed(4), 9000)).json();
@@ -1252,6 +1377,8 @@ async function setLocation(L){
   const previous = state.loc;
   if (!L.city || !L.forecast) await nameUSPoint(L);
 
+  /* Moving the pin has to take the old town's stories with it, or you end
+     up reading the last ZIP's headlines under the new one's name. */
   if (previous && previous.city !== L.city){
     const stale = ['loc-news','loc-area','loc-state','loc-alerts'].map(function(id){
       const f = locFeedsFor(previous).filter(function(x){ return x.id === id; })[0];
@@ -1274,9 +1401,10 @@ async function setLocation(L){
     pull(f).then(function(){ drawSources(); drawTabs(); draw(); });
   });
   drawSources(); drawTabs(); draw();
-  saveStream();
+  saveStream();          // otherwise a reload restores the old town's stories
 }
 
+/* Feeds that only exist once we know where "here" is. */
 function locFeeds(){ return locFeedsFor(state.loc); }
 function locFeedsFor(L){
   if (!L || !L.lat) return [];
@@ -1288,6 +1416,7 @@ function locFeedsFor(L){
     out.push({id:'loc-news', name: L.city + ' news', cat:'local', kind:'rss',
               url: GN(near.join(' OR ') + ' when:4d')});
   }
+  /* Second, wider net so the Local tab is never empty in a small town. */
   if (L.county && L.region){
     out.push({id:'loc-area', name: L.county + ' County area', cat:'local', kind:'rss',
               url: GN('"' + L.county + ' County" OR "' + (STATES[(L.region||'').toUpperCase()] || L.region) + '" when:2d')});
@@ -1327,18 +1456,26 @@ function drawLoc(){
                   : 'Not set — using default sources');
 }
 
+/* Quiet auto-detect on first run. IP location is rough (often the town
+   your ISP routes through), so GPS or a ZIP overrides it. */
 async function autoLocate(){
   if (state.loc && state.loc.lat) { drawLoc(); loadWeather(); loadForecast(); return; }
   try{ await setLocation(await fromIP()); }
   catch(e){ drawLoc(); }
 }
 
+
+/* ============ forecast ============
+   Two forecast periods always ride in the stream as stories. They sit
+   outside the clustering pass on purpose: they're not news, they must
+   never merge with each other, and they must not be crowded out. */
 async function loadForecast(){
   const L = state.loc;
   if (!L || !L.lat){ state.forecast = []; return; }
   const link = 'https://forecast.weather.gov/MapClick.php?lat=' + L.lat.toFixed(4) + '&lon=' + L.lon.toFixed(4);
   const out = [];
 
+  /* NWS writes the forecast in plain English, so use it where it exists. */
   if (L.forecast){
     try{
       const j = await (await timedFetch(L.forecast, 10000)).json();
@@ -1353,6 +1490,7 @@ async function loadForecast(){
     }catch(e){}
   }
 
+  /* Outside NWS coverage, or if it failed, build the same two from Open-Meteo. */
   if (!out.length){
     try{
       const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + L.lat.toFixed(3)
@@ -1384,6 +1522,10 @@ async function loadForecast(){
   draw();
 }
 
+/* ============ TV display mode ============
+   ?tv=1 turns the page into a hands-off board: no controls, big type,
+   pages of stories cycling on a timer. Settings ride in the URL because
+   a TV has its own empty localStorage and no practical way to type. */
 const PARAMS = (function(){
   const o = {};
   (location.search.replace(/^\?/,'') + '&' + location.hash.replace(/^#/,''))
@@ -1394,6 +1536,10 @@ const PARAMS = (function(){
     });
   return o;
 })();
+/* ---- what kind of screen is this? ----
+   Wire Desk runs on a phone, a laptop and a TV, and each wants a
+   different shape. This picks one automatically; ?tv=1 and ?tv=0
+   override it either way. */
 function detectDevice(){
   const ua = navigator.userAgent || '';
   const mq = q => !!(window.matchMedia && window.matchMedia(q).matches);
@@ -1401,6 +1547,8 @@ function detectDevice(){
   if (/Tizen|SMART-TV|SmartTV|Smart-TV|WebOS|Web0S|hbbtv|HbbTV|NetCast|BRAVIA|AFT[A-Z]|GoogleTV|CrKey|VIDAA|Roku|AppleTV|PlayStation|Xbox/i.test(ua))
     return 'tv';
 
+  /* A pointer that can't hover, on a screen far too big for a tablet,
+     is a remote control aimed at a television. */
   if (mq('(hover:none)') && mq('(pointer:coarse)') && screen.width >= 1280 && !('ontouchstart' in window))
     return 'tv';
 
@@ -1448,6 +1596,19 @@ function drawTV(rows){
     return i===tvPage ? '\u25CF' : '\u25CB'; }).join(' ') + '</div>';
 }
 
+/* ============ live video ============
+   Official broadcaster livestreams via YouTube's own embed player.
+   Two URL shapes are supported: a specific video, or a channel — the
+   channel form auto-follows whatever that outlet is streaming right
+   now, so it never goes stale.
+
+   Note: "free IPTV playlist" .m3u8 links circulating online are
+   unlicensed restreams. They die constantly and aren't worth wiring in. */
+/* Resolve any YouTube page to its permanent channel ID by reading the
+   page's own markup. That matters because broadcasters restart their
+   24/7 streams regularly — a video ID goes dead, a channel ID never
+   does. Once we have the channel, YouTube itself looks up the current
+   live stream on every single page load. */
 async function resolveChannel(url){
   const html = await relayFetch(url);
   let m = /"channelId":"(UC[\w-]{20,})"/.exec(html);
@@ -1474,11 +1635,21 @@ function videoSrc(v){
     : 'https://www.youtube.com/embed/' + v + '?' + common;
 }
 
+/* YouTube's live_stream?channel= endpoint is old and frequently answers
+   with "Video unavailable" even when the channel is plainly streaming.
+   Reading the channel's own /live page for the current video ID and
+   embedding that directly is far more reliable — and since it re-runs on
+   every load, it still follows the stream through restarts. */
+/* Returns a video id ONLY when that video is genuinely broadcasting live.
+   The earlier version fell back to the channel's newest upload, which for a
+   news channel is nearly always a two-minute clip — that's why several
+   channels were playing videos instead of the live feed. A wrong stream is
+   worse than none, so this now returns nothing rather than guessing. */
 async function currentLive(chanId){
   try{
     const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
     const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
-    if (!isLive) return '';
+    if (!isLive) return '';                 // channel isn't streaming right now
     let m = /"videoId":"([\w-]{11})"/.exec(html);
     if (m) return m[1];
     m = /watch\?v=([\w-]{11})/.exec(html);
@@ -1531,6 +1702,11 @@ function setVideo(v, name){
     if (sel) sel.onchange = function(){ pickChannel(sel.value); };
     box.classList.toggle('unpinned', !state.pinned);
   };
+  /* Nothing loads until you ask it to. An iframe that never resolves is
+     worse than a button that plainly says "not started yet". */
+  /* Automation can't always get through. Rather than a dead player, this
+     opens the channel on YouTube and takes the link back off the clipboard,
+     which then gets saved for good. */
   const capture = function(msg){
     box.innerHTML = '<div class="pbar">'
       + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
@@ -1603,6 +1779,10 @@ function setVideo(v, name){
     save(); draw(); return;
   }
 
+  /* A failed lookup must never take down a player that is already running.
+     The live_stream embed needs no relay whatsoever — the lookup is only
+     ever an upgrade on top of it, so a failure just leaves things as they
+     were and offers a manual fix. */
   const softFail = function(){
     $('#vidnote').textContent = '';
     const bar2 = box.querySelector('.pbar');
@@ -1615,6 +1795,8 @@ function setVideo(v, name){
     }
   };
 
+  /* Reuse the last stream ID we resolved for this channel, so returning to
+     the page doesn't depend on the relays answering all over again. */
   let known = state.liveIds && state.liveIds[v];
   const savedAt = (state.liveAt && state.liveAt[v]) || 0;
   const fromBuild = LIVEMAP && Object.keys(LIVEMAP).some(function(k){
@@ -1655,10 +1837,16 @@ function drawTicker(rows){
     return '<span>' + (flagged(c) || hot(c) ? '<b>' + esc(c.rep.title) + '</b>' : esc(c.rep.title))
       + (n>1 ? '  \u00B7 ' + n + ' outlets' : '') + '</span>';
   }).join('');
-  $('#tickin').innerHTML = bits + bits;
+  $('#tickin').innerHTML = bits + bits;   // doubled so the loop reads seamlessly
 }
 
+
+/* ============ source directory ============
+   Everything here is free and needs no account. Where an outlet's own
+   RSS path is unreliable or unknown, it goes through Google News'
+   per-country feed instead — one endpoint that is always valid. */
 const CATALOG = [
+  /* --- English, international --- */
   {n:'BBC World',           r:'UK',        l:'en', k:'rss', c:'world', u:'https://feeds.bbci.co.uk/news/world/rss.xml'},
   {n:'Guardian World',      r:'UK',        l:'en', k:'rss', c:'world', u:'https://www.theguardian.com/world/rss'},
   {n:'Euronews',            r:'Europe',    l:'en', k:'rss', c:'world', u:GSITE('euronews.com','en-GB','GB')},
@@ -1677,6 +1865,7 @@ const CATALOG = [
   {n:'Philippines top',     r:'Philippines',l:'en',k:'rss', c:'world', u:GTOP('en-PH','PH')},
   {n:'Kyiv Independent',    r:'Ukraine',   l:'en', k:'rss', c:'world', u:GSITE('kyivindependent.com','en-US','US')},
 
+  /* --- Español --- */
   {n:'Colombia — portada',  r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GTOP('es-419','CO')},
   {n:'El Tiempo',           r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('eltiempo.com','es-419','CO')},
   {n:'El Espectador',       r:'Colombia',  l:'es', k:'rss', c:'espanol', u:GSITE('elespectador.com','es-419','CO')},
@@ -1704,6 +1893,7 @@ const CATALOG = [
   {n:'Univision',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('univision.com','es-419','US')},
   {n:'Telemundo',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('telemundo.com','es-419','US')},
 
+  /* --- live video. Verified IDs play instantly; handles resolve once. --- */
   {n:'Sky News',            r:'UK',        l:'en', k:'yt', v:'c:UCoMdktPbSTixAyNGwb-UYkQ'},
   {n:'Al Jazeera English',  r:'Qatar',     l:'en', k:'yt', v:'c:UCNye-wNBqNL5ZzHSJj3l8Bg'},
   {n:'Sky News Español',    r:'UK',        l:'es', k:'yt', v:'c:UCzG5BnqHO8oNlrPDW9CYJog'},
@@ -1722,6 +1912,8 @@ const CATALOG = [
   {n:'El Tiempo',           r:'Colombia',  l:'es', k:'yt', h:'@eltiempo'},
   {n:'Milenio',             r:'México',    l:'es', k:'yt', h:'@milenio'},
 
+  /* --- markets. These stream during market hours, not around the clock,
+         so outside those hours the channel simply has nothing live. --- */
   {n:'TraderTV Live',       r:'Markets',   l:'en', k:'yt', h:'@TraderTVLive'},
   {n:'NinjaTrader',         r:'Markets',   l:'en', k:'yt', h:'@NinjaTrader'},
   {n:'Smooth Trader TV',    r:'Markets',   l:'en', k:'yt', h:'@SmoothTraderTV'}
@@ -1782,8 +1974,10 @@ function hashOf(str){
   return h;
 }
 
+/* Step to the next live channel in the directory. Ones already resolved
+   switch instantly; the rest get looked up on the way. */
 function nextChannel(){
-  if (state.resolving) return;
+  if (state.resolving) return;                 // don't stack lookups
   const live = CATALOG.filter(function(e){ return e.k === 'yt'; });
   if (!live.length) return;
   let at = -1;
@@ -1800,6 +1994,9 @@ function nextChannel(){
   drawCatalog();
 }
 
+/* Wires carry the whole planet. A story about the US military in Gaza is
+   still world news, so any headline naming a foreign place or people is
+   routed to World no matter which wire it came off. */
 const FOREIGN = ('gaza israel israeli palestin hamas hezbollah lebanon syria iran iranian iraq yemen houthi '
 + 'ukraine ukrainian russia russian moscow kyiv kremlin putin belarus poland polish germany german berlin '
 + 'france french paris britain british london england uk scotland ireland irish spain spanish madrid italy '
@@ -1823,7 +2020,15 @@ function isForeign(c){
 }
 const hasCat = (c, list) => [...c.cats].some(function(x){ return list.indexOf(x) >= 0; });
 
+/* ============ Bluesky accounts ============
+   News organisations verify on Bluesky by using their own domain as their
+   handle, so these are checkable rather than guessable. Each one is filed
+   under the section it belongs to, not lumped into Social.
+   Handles are verified against Bluesky's public profile API before they
+   appear in the picker, so a wrong guess quietly disappears instead of
+   failing later. */
 const BSKY = [
+  /* confirmed in Bluesky's own news directory */
   {n:'Reuters',            h:'reuters.com',            c:'wires',    ok:1},
   {n:'Washington Post',    h:'washingtonpost.com',     c:'wires',    ok:1},
   {n:'New York Times',     h:'nytimes.com',            c:'wires',    ok:1},
@@ -1842,6 +2047,7 @@ const BSKY = [
   {n:'Techmeme',           h:'techmeme.com',           c:'reads',    ok:1},
   {n:'Rhode Island Current',h:'rhodeislandcurrent.com',c:'state',    ok:1},
 
+  /* same domain-handle convention, verified at runtime */
   {n:'NPR',                h:'npr.org',                c:'wires'},
   {n:'AP News',            h:'apnews.com',             c:'wires'},
   {n:'ProPublica',         h:'propublica.org',         c:'wires'},
@@ -1854,6 +2060,7 @@ const BSKY = [
   {n:"The Public's Radio", h:'thepublicsradio.org',    c:'state'}
 ];
 
+/* Bluesky's profile lookup is public, CORS-clean and needs no relay. */
 async function verifyHandle(h){
   if (state.bskyOk[h] !== undefined) return state.bskyOk[h];
   try{
@@ -1877,6 +2084,10 @@ function bskyLive(){
   return BSKY.filter(function(b){ return b.ok || state.bskyOk[b.h] !== false; });
 }
 
+/* ============ sections ============
+   Nine tabs over one stream. "All" is a digest — the four biggest stories
+   from each section — and each tab opens the full list for that section.
+   Badges count what has arrived since you last opened that tab. */
 const TABS = [
   {id:'all',      label:'All',      cats:null, match:null},
   {id:'t-local',  label:'Local',    cats:['local'],
@@ -1917,6 +2128,7 @@ function clustersFor(tab){
   });
   out = out.sort(function(a,b){ return score(b) - score(a); });
 
+  /* forecast rides with Local, and only when nothing is being filtered */
   if (!f && state.forecast.length && state.on.has('local') && (!cats || cats.indexOf('local') >= 0)){
     out = state.forecast.concat(out);
   }
@@ -1950,6 +2162,8 @@ function openTab(id){
   window.scrollTo(0, 0);
 }
 
+/* Channels you paste in are kept alongside the built-in ones, so a feed
+   you found once is in the dropdown from then on. */
 function rememberChannel(key, name){
   state.myChannels = state.myChannels || [];
   if (state.myChannels.some(function(c){ return c.v === key; })) return;
@@ -1999,6 +2213,7 @@ function channelOptions(placeholder){
   return html;
 }
 
+/* Every channel picker — rail, player bar, poster — runs through here. */
 function pickChannel(key){
   if (!key) return;
   const e = allChannels().filter(function(x){ return x.v === key || x.h === key; })[0];
@@ -2035,19 +2250,24 @@ function drawBskyPicker(){
   sel.innerHTML = html;
 }
 
+/* ============ rendering ============ */
+/* 0 = your town, 1 = your state, 2 = national, 3 = international. */
 function tierOf(c){
   const t = c.cats;
   if (t.has('local')) return 0;
   if (t.has('state')) return 1;
   if (t.has('world') || t.has('espanol')) return 3;
   if (t.has('finance')) return 2;
-  if (t.has('wires') && isForeign(c)) return 3;
+  if (t.has('wires') && isForeign(c)) return 3;   // US military in Gaza is still world news
   return 2;
 }
 const TIER_WEIGHT = [2.4, 1.7, 1.15, 0.45];
 
+/* Ranking pushes international down; this hard cap keeps it down.
+   Two international stories per 28 rows, placed at 14 and 28, with the
+   rest held back until the domestic stream runs dry. */
 function applyQuota(rows){
-  const BLOCK = 14;
+  const BLOCK = 14;                 // one international slot per block
   const intl = [], home = [];
   rows.forEach(function(c){ (tierOf(c) === 3 ? intl : home).push(c); });
   const out = [];
@@ -2062,13 +2282,13 @@ function applyQuota(rows){
 
 function score(c){
   const hrs = (Date.now() - c.last)/HOUR;
-  let s = 100/(1+hrs);
-  s += Math.min(c.sources.size,8) * 14;
+  let s = 100/(1+hrs);                         // recency
+  s += Math.min(c.sources.size,8) * 14;        // pickup weight
   if (flagged(c)) s += 400;
   if (hot(c)) s += 200;
-  if (c.cats.has('reads') && c.sources.size<2) s *= 0.35;
-  s *= TIER_WEIGHT[tierOf(c)];
-  if (c.undated && c.sources.size < 2) s *= 0.35;
+  if (c.cats.has('reads') && c.sources.size<2) s *= 0.35;   // reads never shout
+  s *= TIER_WEIGHT[tierOf(c)];                              // home first, world last
+  if (c.undated && c.sources.size < 2) s *= 0.35;           // its "now" is a guess, not a fact
   return s;
 }
 function visible(){
@@ -2077,12 +2297,19 @@ function visible(){
   if (f) out = out.filter(c => (c.rep.title+' '+[...c.sources].join(' ')).toLowerCase().includes(f));
   const ranked = applyQuota(diversify(out.sort((a,b) => score(b) - score(a)).slice(0,250)));
 
+  /* Slot the forecast in below the top two headlines — high enough to see
+     without scrolling, low enough that it never outranks breaking news.
+     Skipped while filtering, so a filter still means what it says. */
   if (state.forecast.length && !f && state.on.has('local')){
     return ranked.slice(0, 2).concat(state.forecast, ranked.slice(2));
   }
   return ranked;
 }
 
+/* Ranking alone lets one fast, prolific feed take ten slots in a row —
+   which is what "it's all Australia" looks like. This keeps the order
+   but allows any one outlet at most twice in any four consecutive rows,
+   pulling the next-best different source up instead. */
 function diversify(rows){
   const CAP = 2, WINDOW = 4;
   const pool = rows.slice(), out = [], recent = [];
@@ -2124,6 +2351,11 @@ function rowHTML(c, terms){
       </span></a>`;
 }
 
+/* The digest: every section's top few, so one screen tells you what the
+   day looks like without committing to any one feed. */
+/* A story tagged wires + politics used to headline both sections, so the
+   digest showed the same thing three times. Each story now belongs to the
+   first section that claims it, in tab order. */
 function primaryTab(c){
   for (let i = 1; i < TABS.length; i++){
     if (TABS[i].match && TABS[i].match(c)) return TABS[i].id;
@@ -2250,6 +2482,9 @@ function drawCats(){
   });
 }
 
+/* ============ pull to refresh ============
+   Only arms at the very top of the page, so it never fights a normal
+   scroll. Passive listeners — this must not cost scrolling smoothness. */
 (function(){
   const el = document.getElementById('pull');
   if (!el) return;
@@ -2281,8 +2516,8 @@ function drawCats(){
     if (h >= 46){
       el.classList.add('spinning');
       if (label) label.textContent = 'Refreshing\u2026';
-      CACHE.clear();
-      cycle = 0;
+      CACHE.clear();                       // a manual pull means "ignore the cache"
+      cycle = 0;                           // and fetch every category, not just the due ones
       Promise.resolve(loadAll()).then(function(){
         el.classList.remove('spinning');
         el.style.height = '0px';
@@ -2294,6 +2529,7 @@ function drawCats(){
   }, {passive:true});
 })();
 
+/* ============ timers ============ */
 function schedule(){
   clearInterval(state.timer); clearInterval(state.tick);
   const secs = +$('#interval').value;
@@ -2306,6 +2542,7 @@ function schedule(){
   },1000);
 }
 
+/* ============ wiring ============ */
 $('#notify').onclick = async () => {
   if (!window.Notification){
     $('#notify').textContent = 'Add to Home Screen first (iOS)';
@@ -2352,9 +2589,13 @@ $('#fadd').onclick = () => {
 };
 $('#furl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#fadd').click(); });
 
+/* Takes anything YouTube-shaped — a stream, a channel, an @handle —
+   and always tries to end up holding a channel ID. */
 async function acceptVideo(input, label, cacheKey){
   const raw = (input||'').trim();
   if (!raw) return;
+  /* One lookup at a time. Rapid taps used to queue several relay fetches
+     at once and stall the whole page waiting on proxies that never answer. */
   if (state.resolving){ $('#vidnote').textContent = 'Still looking up the last one…'; return; }
   state.resolving = true;
   try{ return await acceptVideoInner(raw, label, cacheKey); }
@@ -2372,6 +2613,7 @@ async function acceptVideoInner(raw, label, cacheKey){
     return;
   }
 
+  /* an @handle, /c/ or /user/ URL has no ID in it — read the page for one */
   const looksLikeChannelPage = /youtube\.com\/(@|c\/|user\/)/i.test(raw);
   const lookupUrl = looksLikeChannelPage ? raw
                   : (parsed ? 'https://www.youtube.com/watch?v=' + parsed : '');
@@ -2435,7 +2677,7 @@ document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
   markChannel(b);
   const handle = b.dataset.yt;
   const cached = state.chans[handle];
-  if (cached){
+  if (cached){                       // looked up once before — instant now
     $('#vidnote').textContent = '';
     setVideo(cached);
     return;
@@ -2487,7 +2729,7 @@ $('#relaytest').onclick = async () => {
   const probe = 'https://feeds.bbci.co.uk/news/world/rss.xml';
   const results = [];
   for (const r of activeRelays()){
-    r.fails = 0; r.wins = 0; r.ms = 0;
+    r.fails = 0; r.wins = 0; r.ms = 0;    // fresh measurement each run
     const t0 = Date.now();
     try{
       const res = await timedFetch(r.u(probe), 15000);
@@ -2496,7 +2738,7 @@ $('#relaytest').onclick = async () => {
       if (r.unwrap) body = r.unwrap(body);
       if (!body || body.length < 200) throw new Error('empty');
       const dt = Date.now() - t0;
-      noteWin(r, dt);
+      noteWin(r, dt);                      // feed the result into the ordering
       results.push(r.n + ': ok (' + dt + 'ms)');
     }catch(e){ r.fails++; results.push(r.n + ': ' + (e.message || 'failed')); }
     out.innerHTML = results.join('<br>');
@@ -2533,10 +2775,12 @@ $('#railtoggle').onclick = () => {
   if (!open) window.scrollTo({top:0});
 };
 
+/* iOS Safari freezes timers in background tabs, so catch up on return. */
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && Date.now() - state.due > 0) loadAll();
 });
 
+/* No devtools on a television, so surface fatal errors on screen. */
 window.onerror = function(msg, src, line){
   const b = document.createElement('div');
   b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#D2685A;'
