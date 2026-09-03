@@ -735,8 +735,12 @@ function save(){
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
       video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
-      playing:state.playing, liveIds:state.liveIds, liveAt:state.liveAt, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:3, myChannels:state.myChannels
+      /* liveIds are NOT persisted. They come from live.json on every load,
+         so saving them only lets a bad build poison the device for good —
+         which is how one wrong stream kept reappearing across reloads. Only
+         streams you pasted yourself are kept. */
+      playing:state.playing, manualIds:state.manualIds, videoName:state.videoName,
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels
     }));
   }catch(e){}
 }
@@ -762,9 +766,12 @@ function restore(){
     if (s.myChannels) state.myChannels = s.myChannels;
     /* Ids saved before the live-only fix may be clips rather than streams,
        so they're dropped once. */
-    if (s.vfix === 3){
-      if (s.liveIds) state.liveIds = s.liveIds;
-      if (s.liveAt) state.liveAt = s.liveAt;
+    if (s.manualIds){
+      state.manualIds = s.manualIds;
+      Object.keys(s.manualIds).forEach(function(k){
+        state.liveIds[k] = s.manualIds[k].id;
+        state.liveAt[k] = s.manualIds[k].at;
+      });
     }
     if (s.videoName) state.videoName = s.videoName;
     state.restored = true;
@@ -788,6 +795,7 @@ const state = {
   videoName: '',
   liveIds: {},           // channel -> last resolved live video id
   liveAt: {},            // and when that was resolved
+  manualIds: {},         // only the streams you pasted by hand
   myChannels: [],        // channels you pasted in yourself
   forcePlay: '',         // channel you chose to watch despite being off air
   restoredY: 0,
@@ -1787,6 +1795,8 @@ function setVideo(v, name){
       state.liveIds[v] = id;
       state.liveAt = state.liveAt || {};
       state.liveAt[v] = Date.now();
+      state.manualIds = state.manualIds || {};
+      state.manualIds[v] = {id: id, at: Date.now()};   // yours, so it's kept
       state.playing = true;
       save();
       $('#vidnote').textContent = 'Saved. That stream will play from now on.';
