@@ -296,15 +296,17 @@ async function buildLive() {
     }));
   }
 
-  /* Keep the previous answer for anything that failed this run. */
-  if (fs.existsSync(LIVE)) {
-    try {
-      const prev = JSON.parse(fs.readFileSync(LIVE, 'utf8'));
-      for (const k of Object.keys(prev.channels || {})) if (!out[k]) out[k] = prev.channels[k];
-    } catch (e) { /* unreadable; carry on */ }
-  }
+  /* No carry-forward. This block used to copy the previous run's answer
+     for any channel that didn't resolve — but every correctness check added
+     since works by REJECTING a channel, which left the old, wrong entry to be
+     restored. Fixes could never take hold, and one wrong stream reappeared
+     no matter how many times it was fixed.
 
-  fs.writeFileSync(LIVE, JSON.stringify({ built: Date.now(), channels: out }));
+     A live stream id is worth minutes, not hours. If this run couldn't verify
+     a channel, the honest answer is that it has no stream right now — the
+     page falls back to the channel embed or says the channel is off air. */
+
+  fs.writeFileSync(LIVE, JSON.stringify({ built: Date.now(), v: 2, channels: out }));
   console.log(`live: ${live} streaming now, ${Object.keys(out).length} channels resolved`);
 }
 
