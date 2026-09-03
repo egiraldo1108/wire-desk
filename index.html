@@ -789,6 +789,7 @@ const state = {
   liveIds: {},           // channel -> last resolved live video id
   liveAt: {},            // and when that was resolved
   myChannels: [],        // channels you pasted in yourself
+  forcePlay: '',         // channel you chose to watch despite being off air
   restoredY: 0,
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
@@ -1015,6 +1016,17 @@ function drawAgentNote(){
     + (stale ? ' \u2014 too old to trust, the schedule has stopped running.' : ' right now.');
   el.style.color = stale ? 'var(--flag)' : '';
 }
+
+/* What the build knows about the channel currently loaded. */
+function buildRec(v){
+  if (!LIVEMAP) return null;
+  const keys = Object.keys(LIVEMAP);
+  for (let i = 0; i < keys.length; i++){
+    if (keys[i] === v || LIVEMAP[keys[i]].chan === v) return LIVEMAP[keys[i]];
+  }
+  return null;
+}
+function buildFresh(){ return LIVE_AT && (Date.now() - LIVE_AT < 90*60*1000); }
 
 function liveNow(entry){
   if (!LIVEMAP) return null;
@@ -1654,11 +1666,13 @@ function parseVideo(input){
   m = /\/channel\/(UC[\w-]+)/.exec(input);           if (m) return 'c:' + m[1];
   return '';
 }
+/* Only ever embeds a specific video. The old live_stream?channel= form is
+   gone: when a channel is off air YouTube quietly substitutes a recommended
+   stream, which is why unrelated channels all landed on the same broadcast,
+   and why the failures differed from device to device. */
 function videoSrc(v){
   const common = 'autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1';
-  return v.indexOf('c:') === 0
-    ? 'https://www.youtube.com/embed/live_stream?channel=' + v.slice(2) + '&' + common
-    : 'https://www.youtube.com/embed/' + v + '?' + common;
+  return 'https://www.youtube.com/embed/' + v + '?' + common;
 }
 
 /* YouTube's live_stream?channel= endpoint is old and frequently answers
@@ -1676,6 +1690,10 @@ async function currentLive(chanId){
     const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
     const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
     if (!isLive) return '';                 // channel isn't streaming right now
+    /* When a channel is off air YouTube hands back somebody else's
+       recommended stream. The video has to belong to this channel. */
+    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
+    if (owner && owner[1] !== chanId) return '';
     let m = /"videoId":"([\w-]{11})"/.exec(html);
     if (m) return m[1];
     m = /watch\?v=([\w-]{11})/.exec(html);
@@ -1823,7 +1841,40 @@ function setVideo(v, name){
 
   /* Reuse the last stream ID we resolved for this channel, so returning to
      the page doesn't depend on the relays answering all over again. */
+  /* When the build says a channel is off air, refuse to mount anything.
+     YouTube's live_stream resolver happily serves that channel's LAST
+     broadcast instead of nothing, which is how a four-hour replay ends up
+     on screen pretending to be live. */
+  const rec = buildRec(v);
+  if (rec && buildFresh() && !rec.live && state.forcePlay !== v){
+    box.innerHTML = '<div class="pbar">'
+      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
+      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
+      + '<button id="pstop">Hide</button></div>'
+      + '<div class="capture"><p>' + esc(rec.name || state.videoName || 'That channel')
+      + " isn't broadcasting right now.</p>"
+      + '<a class="cgo" href="' + link + '" target="_blank" rel="noopener">Open on YouTube \u2197</a>'
+      + '<p class="chint">Or pick a channel showing \u25CF above \u2014 those are live.</p>'
+      + '<button class="cgo alt" id="playanyway">Play their last broadcast</button></div>';
+    const sel2 = document.getElementById('pbarpick');
+    if (sel2) sel2.onchange = function(){ pickChannel(sel2.value); };
+    const hide2 = document.getElementById('pstop');
+    if (hide2) hide2.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); };
+    const any = document.getElementById('playanyway');
+    if (any) any.onclick = function(e){
+      e.preventDefault();
+      state.forcePlay = v;                 // you asked for it explicitly
+      setVideo(v, state.videoName);
+    };
+    box.classList.toggle('unpinned', !state.pinned);
+    if (TV) document.body.classList.add('vid');
+    save(); draw();
+    return;
+  }
+  if (state.forcePlay === v) state.forcePlay = '';
+
   let known = state.liveIds && state.liveIds[v];
+  if (v.indexOf('c:') !== 0) known = v;        // a bare video id is its own answer
   const savedAt = (state.liveAt && state.liveAt[v]) || 0;
   /* Any saved id expires. Build ids get 90 minutes (they refresh often),
      ids you pasted yourself get 12 hours. An expired id is dropped so the
@@ -1833,7 +1884,20 @@ function setVideo(v, name){
   });
   const maxAge = fromBuild ? 90*60*1000 : 12*HOUR;
   if (known && savedAt && Date.now() - savedAt > maxAge) known = null;
-  mount(videoSrc(known || v));
+
+  if (known){
+    mount(videoSrc(known));
+  } else {
+    /* No verified stream for this channel. Showing nothing is right —
+       the alternative is playing whatever YouTube feels like substituting. */
+    const entry = CATALOG.concat(state.myChannels || []).filter(function(x){
+      return x.v === v || state.chans[x.h] === v;
+    })[0];
+    const offAir = entry && liveNow(entry) === false;
+    capture(offAir
+      ? (entry.n || 'That channel') + " isn't broadcasting right now."
+      : 'No confirmed stream for this channel yet.');
+  }
 
   if (v.indexOf('c:') === 0){
     currentLive(v.slice(2)).then(function(id){
