@@ -941,7 +941,7 @@ function add(o){
 
 /* drop anything older than 48h so memory stays flat */
 function prune(){
-  const cut = Date.now() - 48*HOUR;
+  const cut = Date.now() - 24*HOUR;
   for (const [k,c] of state.clusters) if (c.last < cut) state.clusters.delete(k);
 }
 
@@ -2364,7 +2364,7 @@ function primaryTab(c){
 }
 
 function drawDigest(terms){
-  let html = '', total = 0;
+  let html = '', total = 0, shown = 0;
   TABS.forEach(function(t){
     if (t.id === 'all') return;
     const rows = clustersFor(t).filter(function(c){
@@ -2373,6 +2373,7 @@ function drawDigest(terms){
     if (!rows.length) return;
     const n = newCount(t);
     total += rows.length;
+    shown += Math.min(rows.length, DIGEST_PER_SECTION);
     html += '<div class="sec"><h3>' + t.label + '</h3>'
          + '<span class="n">' + rows.length + (n ? ' · ' + n + ' new' : '') + '</span>'
          + '<button class="more" data-open="' + t.id + '">See all \u203A</button></div>'
@@ -2382,7 +2383,7 @@ function drawDigest(terms){
   $('#list').querySelectorAll('[data-open]').forEach(function(b){
     b.onclick = function(e){ e.preventDefault(); openTab(b.dataset.open); };
   });
-  return total;
+  return shown ? {shown: shown, total: total} : 0;
 }
 
 function draw(){
@@ -2401,9 +2402,12 @@ function draw(){
   drawTabs();
 
   if (tab.id === 'all' && !$('#filter').value.trim()){
-    const total = drawDigest(terms);
-    $('#count').textContent = total ? total + (total===1?' story':' stories') : '—';
-    if (total) return;
+    const d = drawDigest(terms);
+    if (d){
+      $('#count').textContent = d.shown + ' of ' + d.total;
+      return;
+    }
+    $('#count').textContent = '—';
   }
 
   const rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab)).slice(0,200);
@@ -2782,7 +2786,15 @@ document.addEventListener('visibilitychange', () => {
 
 /* No devtools on a television, so surface fatal errors on screen. */
 window.onerror = function(msg, src, line){
+  /* A cross-origin script that throws is reported to the page as the
+     opaque string "Script error." with no file and line 0 — the browser
+     withholds the detail for security. That's almost always the YouTube
+     player or the font CDN, neither of which is our problem, and showing
+     a red banner for it just looks like the page is broken. */
+  if (!msg || /^Script error\.?$/i.test(String(msg)) || (!src && !line)) return;
+  if (document.getElementById('errbanner')) return;    // one is enough
   const b = document.createElement('div');
+  b.id = 'errbanner';
   b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#D2685A;'
     + 'color:#141A20;padding:10px 14px;font:14px/1.3 sans-serif';
   b.textContent = 'Script error: ' + msg + ' (line ' + line + ')';
