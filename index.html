@@ -1666,13 +1666,15 @@ function parseVideo(input){
   m = /\/channel\/(UC[\w-]+)/.exec(input);           if (m) return 'c:' + m[1];
   return '';
 }
-/* Only ever embeds a specific video. The old live_stream?channel= form is
-   gone: when a channel is off air YouTube quietly substitutes a recommended
-   stream, which is why unrelated channels all landed on the same broadcast,
-   and why the failures differed from device to device. */
+/* live_stream?channel= only misbehaves when the channel is OFF AIR — then
+   YouTube substitutes somebody else's recommended stream. When the channel
+   really is live it serves the right thing. So it stays, but it is only ever
+   used for a channel the build has confirmed is broadcasting. */
 function videoSrc(v){
   const common = 'autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1';
-  return 'https://www.youtube.com/embed/' + v + '?' + common;
+  return v.indexOf('c:') === 0
+    ? 'https://www.youtube.com/embed/live_stream?channel=' + v.slice(2) + '&' + common
+    : 'https://www.youtube.com/embed/' + v + '?' + common;
 }
 
 /* YouTube's live_stream?channel= endpoint is old and frequently answers
@@ -1885,18 +1887,21 @@ function setVideo(v, name){
   const maxAge = fromBuild ? 90*60*1000 : 12*HOUR;
   if (known && savedAt && Date.now() - savedAt > maxAge) known = null;
 
+  const entry = CATALOG.concat(state.myChannels || []).filter(function(x){
+    return x.v === v || state.chans[x.h] === v;
+  })[0];
+  const airing = entry ? liveNow(entry) : null;   // true / false / unknown
+
   if (known){
-    mount(videoSrc(known));
+    mount(videoSrc(known));                       // a verified stream, best case
+  } else if (airing === false){
+    /* Confirmed off air. This is the only case where the channel embed
+       would substitute someone else's broadcast, so don't use it. */
+    capture((entry.n || 'That channel') + " isn't broadcasting right now.");
   } else {
-    /* No verified stream for this channel. Showing nothing is right —
-       the alternative is playing whatever YouTube feels like substituting. */
-    const entry = CATALOG.concat(state.myChannels || []).filter(function(x){
-      return x.v === v || state.chans[x.h] === v;
-    })[0];
-    const offAir = entry && liveNow(entry) === false;
-    capture(offAir
-      ? (entry.n || 'That channel') + " isn't broadcasting right now."
-      : 'No confirmed stream for this channel yet.');
+    /* Live, or not yet known. The channel embed is safe here and is the
+       only thing that plays without a working proxy. */
+    mount(videoSrc(v));
   }
 
   if (v.indexOf('c:') === 0){
