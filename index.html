@@ -1267,7 +1267,10 @@ async function loadAll(){
   const failed = jobs.filter(f => state.health[f.id] && !state.health[f.id].ok);
   if (failed.length){
     $('#status').textContent = 'Retrying ' + failed.length + '…';
-    relayCursor++;
+    /* Nudge the relay ordering so the retry doesn't land on whatever just
+       failed. (This counter went missing in a rewrite and threw here,
+       killing the refresh mid-cycle without any visible error.) */
+    RELAYS.forEach(function(r){ if (r.fails > 0) r.fails += 0.5; });
     await Promise.race([
       Promise.all(failed.map(f => pull(f))),
       new Promise(function(res){ setTimeout(res, 30000); })
@@ -1694,8 +1697,10 @@ async function currentLive(chanId){
     if (!isLive) return '';                 // channel isn't streaming right now
     /* When a channel is off air YouTube hands back somebody else's
        recommended stream. The video has to belong to this channel. */
+    /* Ownership must be proven, not assumed. If the markup doesn't say who
+       owns this video, it isn't good enough to swap a stream for. */
     const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    if (owner && owner[1] !== chanId) return '';
+    if (!owner || owner[1] !== chanId) return '';
     let m = /"videoId":"([\w-]{11})"/.exec(html);
     if (m) return m[1];
     m = /watch\?v=([\w-]{11})/.exec(html);
@@ -1904,7 +1909,10 @@ function setVideo(v, name){
     mount(videoSrc(v));
   }
 
-  if (v.indexOf('c:') === 0){
+  /* Don't go looking for an upgrade when the build already handed us a
+     fresh, verified stream — that lookup is exactly what was replacing a
+     correct stream with somebody else's video a moment after it loaded. */
+  if (v.indexOf('c:') === 0 && !(known && fromBuild)){
     currentLive(v.slice(2)).then(function(id){
       if (id && state.video === v){
         state.liveIds = state.liveIds || {};
