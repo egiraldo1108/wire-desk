@@ -135,7 +135,13 @@ async function page(url) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                     + '(KHTML, like Gecko) Chrome/122.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'Accept-Language': 'en-US,en;q=0.9',
+        /* YouTube serves datacenter IPs a cookie-consent wall instead of the
+           real page, and that wall contains no video data. These are the
+           cookies the consent screen would set if a person clicked through,
+           and they get the actual page returned. */
+        'Cookie': 'CONSENT=YES+cb; SOCS=CAI; PREF=hl=en&gl=US',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
     });
     return r.ok ? await r.text() : '';
@@ -152,7 +158,11 @@ async function channelId(handleOrId) {
 }
 
 async function liveVideo(id) {
-  const html = await page('https://www.youtube.com/channel/' + id + '/live');
+  let html = await page('https://www.youtube.com/channel/' + id + '/live');
+  if (html && !/"videoId"/.test(html)) {
+    await new Promise(r => setTimeout(r, 1200));
+    html = await page('https://www.youtube.com/channel/' + id + '/live');   // one retry
+  }
   if (html) {
     const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
     let m = /"videoId":"([\w-]{11})"/.exec(html);
@@ -181,9 +191,11 @@ async function buildLive() {
       const raw = e.v ? e.v.slice(2) : e.h;
       try {
         const cid = await channelId(raw);
-        if (!cid) { console.log(`  ${e.n}: no channel id`); return; }
+        if (!cid) { console.log(`  ${e.n}: could not resolve channel id (consent wall?)`); return; }
         const vid = await liveVideo(cid);
-        if (!vid) { console.log(`  ${e.n}: nothing found`); return; }
+        if (!vid) { console.log(`  ${e.n}: resolved ${cid}, but not streaming`);
+          out[key] = { chan: 'c:' + cid, video: '', live: false, name: e.n };
+          return; }
         out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, name: e.n };
         if (vid.live) live++;
         console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'idle'} ${vid.id}`);
