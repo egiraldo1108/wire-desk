@@ -1208,6 +1208,7 @@ async function searchWires(q){
 /* How often each category is worth re-fetching. On one slow relay the
    difference between 45 requests a cycle and 20 is the difference between
    a usable page and a spinner. */
+let forceAll = false;    // set by a manual pull: fetch everything, ignore cadence
 const CADENCE = {local:1, state:1, wires:1, hazard:1, search:1, finance:1,
                  politics:2, world:2, espanol:2, social:2, mine:2, reads:3};
 let cycle = 0;
@@ -1224,10 +1225,12 @@ async function loadAll(){
   const PRIORITY = ['local','state','wires','finance','hazard','search','politics','world','espanol','social','mine','reads'];
   const jobs = allFeeds()
     .filter(f => state.on.has(f.cat))
-    .filter(f => (PREBUILT && f.url && PREBUILT[f.url])
+    .filter(f => forceAll
+              || (PREBUILT && f.url && PREBUILT[f.url])
               || cycle % (CADENCE[f.cat] || 1) === 0
               || !state.health[f.id])
     .sort((a,b) => PRIORITY.indexOf(a.cat) - PRIORITY.indexOf(b.cat));
+  forceAll = false;
   /* a watch filed under State should load when State is on, not Social */
   const watches = state.watches.filter(function(w){ return state.on.has(w.cat || 'social'); });
   const total = jobs.length + watches.length + (state.query?2:0) || 1;
@@ -2548,12 +2551,14 @@ function drawCats(){
       el.classList.add('spinning');
       if (label) label.textContent = 'Refreshing\u2026';
       CACHE.clear();                       // a manual pull means "ignore the cache"
-      cycle = 0;                           // and fetch every category, not just the due ones
-      Promise.resolve(loadAll()).then(function(){
+      forceAll = true;                     // and every category, not just the due ones
+      const done = function(){
         el.classList.remove('spinning');
         el.style.height = '0px';
         if (label) label.textContent = 'Pull to refresh';
-      });
+      };
+      /* Without the catch, a thrown refresh leaves the spinner up for good. */
+      Promise.resolve(loadAll()).then(done, done);
     } else {
       el.style.height = '0px';
     }
