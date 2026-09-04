@@ -513,6 +513,18 @@ window.setTimeout(function(){
     <div class="block">
       <h2>Feed health</h2>
       <div id="srcs"></div>
+      <button class="btn" id="runbuild" style="margin-top:10px">Run the build now</button>
+      <div id="buildnote" class="hint"></div>
+      <details>
+        <summary>Set up the build button</summary>
+        <p>GitHub needs proof it's you. On github.com go to Settings \u2192 Developer settings \u2192
+        <b>Fine-grained tokens</b> \u2192 Generate new token. Scope it to <b>only</b> the wire-desk
+        repository, give it one permission \u2014 <b>Actions: Read and write</b> \u2014 set an expiry,
+        and paste it below. It is stored on this device only and never goes into the repo,
+        so GitHub won't revoke it. Worst case if someone got it: they could run your build.</p>
+      </details>
+      <input type="text" id="ghtoken" placeholder="GitHub token (stored on this device)"
+             style="margin-top:6px" aria-label="GitHub token">
       <button class="btn" id="relaytest" style="margin-top:10px">Test relays</button>
       <div id="relayout" class="hint"></div>
       <input type="text" id="myrelay" placeholder="Your own relay URL (optional)"
@@ -636,11 +648,12 @@ function noteWin(r, dt){
   r.ms = r.ms ? Math.round(r.ms * 0.7 + dt * 0.3) : dt;   // rolling average
 }
 
-function timedFetch(url, ms){
-  if (!window.AbortController) return fetch(url, {cache:'no-store'});
+function timedFetch(url, ms, opts){
+  const base = Object.assign({cache:'no-store'}, opts || {});
+  if (!window.AbortController) return fetch(url, base);
   const ctl = new AbortController();
   const timer = setTimeout(function(){ ctl.abort(); }, ms || 12000);
-  return fetch(url, {cache:'no-store', signal:ctl.signal})
+  return fetch(url, Object.assign({}, base, {signal:ctl.signal}))
     .then(function(r){ clearTimeout(timer); return r; },
           function(e){ clearTimeout(timer); throw e; });
 }
@@ -794,7 +807,7 @@ function save(){
          which is how one wrong stream kept reappearing across reloads. Only
          streams you pasted yourself are kept. */
       playing:state.playing, manualIds:state.manualIds, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels, ghToken:state.ghToken
     }));
   }catch(e){}
 }
@@ -818,6 +831,7 @@ function restore(){
     if (s.seen) state.seen = s.seen;
     if (s.bskyOk) state.bskyOk = s.bskyOk;
     if (s.myChannels) state.myChannels = s.myChannels;
+    if (s.ghToken){ state.ghToken = s.ghToken; $('#ghtoken').value = s.ghToken; }
     /* Ids saved before the live-only fix may be clips rather than streams,
        so they're dropped once. */
     if (s.manualIds){
@@ -854,6 +868,7 @@ const state = {
   forcePlay: '',         // channel you chose to watch despite being off air
   restoredY: 0,
   mountedSrc: '',        // what the iframe is currently showing
+  ghToken: '',           // device-local, never written to the repo
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
   bskyOk: {},            // handle -> does it exist
@@ -2984,6 +2999,64 @@ $('#myrelay').addEventListener('change', () => {
   save();
   if (state.myRelay){ CACHE.clear(); loadAll(); }
 });
+
+/* Fires the workflow through GitHub's REST API. The token lives in this
+   browser only — putting one in the page itself would be public, and GitHub
+   revokes tokens it finds in a repo anyway. */
+const REPO = 'egiraldo1108/wire-desk';
+const WORKFLOW = 'build-feeds.yml';
+
+$('#ghtoken').addEventListener('change', () => {
+  state.ghToken = $('#ghtoken').value.trim();
+  save();
+  $('#buildnote').textContent = state.ghToken ? 'Token saved on this device.' : '';
+});
+
+$('#runbuild').onclick = async () => {
+  const note = $('#buildnote');
+  if (!state.ghToken){
+    note.textContent = 'Add a token below first — see "Set up the build button".';
+    return;
+  }
+  note.textContent = 'Asking GitHub to run it…';
+  try{
+    const r = await timedFetch(
+      'https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches',
+      15000, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'Authorization': 'Bearer ' + state.ghToken,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ref: 'main' })
+      });
+    if (r.status === 204){
+      note.textContent = 'Build started. Give it about a minute, then pull down to refresh.';
+      /* Poll for the new file rather than making you guess when it's done. */
+      let tries = 0;
+      const was = LIVE_AT;
+      const watch = setInterval(async function(){
+        tries++;
+        await loadLiveMap();
+        if (LIVE_AT > was){
+          clearInterval(watch);
+          note.textContent = 'Build finished — channels refreshed.';
+          drawAgentNote(); drawVidPicker();
+        } else if (tries > 20){
+          clearInterval(watch);
+          note.textContent = 'Started, but the new file hasn\u2019t appeared yet. Check the Actions tab.';
+        }
+      }, 10000);
+    }
+    else if (r.status === 401 || r.status === 403) note.textContent = 'GitHub refused the token — check it has Actions: Read and write on this repo.';
+    else if (r.status === 404) note.textContent = 'Workflow not found. Check the repo name and that build-feeds.yml is on main.';
+    else note.textContent = 'GitHub replied ' + r.status + '.';
+  }catch(e){
+    note.textContent = 'Could not reach GitHub: ' + (e.message || 'failed');
+  }
+};
 
 $('#relaytest').onclick = async () => {
   const out = $('#relayout');
