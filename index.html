@@ -268,31 +268,45 @@
   body.tv .state{padding:12vh 6vw;max-width:none}
   body.tv .state .lead{font-size:3vw}
   body.tv .state .why{font-size:1.6vw}
+  /* Display mode hides every control, which left no way back out except
+     editing the URL. */
+  #tvexit{display:none}
+  body.tv #tvexit{
+    display:block;position:fixed;top:1.2vh;right:1.2vw;z-index:40;
+    background:rgba(22,32,44,.85);border:1px solid var(--line);
+    color:var(--dim);border-radius:3px;padding:.7vh 1.2vw;
+    font-size:1.1vw;cursor:pointer;
+  }
+  body.tv #tvexit:hover,body.tv #tvexit:focus{border-color:var(--lamp);color:var(--lamp)}
+
   /* video board: proper grid — video left, headlines right, ticker across
      the bottom. The old float-based version drifted at different screen
      widths, which is why it never quite lined up. */
   body.tv.vid{overflow:hidden}
   body.tv.vid .stream{
     display:grid;
-    grid-template-columns:60vw 1fr;
+    grid-template-columns:66vw 1fr;
     grid-template-rows:auto 1fr auto;
     height:100vh;
   }
   body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh}
   body.tv.vid #player{
-    grid-column:1;grid-row:2;position:static;align-self:start;
+    grid-column:1;grid-row:2;position:static;
+    align-self:center;            /* sits lower, centred in its column */
     background:#000;
   }
-  body.tv.vid #player .frame{padding-top:33.75vw}   /* 16:9 of 60vw */
+  body.tv.vid #player .frame{padding-top:37.1vw}   /* 16:9 of 66vw */
   body.tv.vid #player .pbar,body.tv.vid #player .poster,body.tv.vid #player .capture{display:none}
   body.tv.vid #list{
     grid-column:2;grid-row:2;overflow:hidden;
     border-left:1px solid var(--line);
+    display:flex;flex-direction:column;justify-content:flex-start;
   }
+  body.tv.vid .item{flex:0 0 auto}
   body.tv.vid .item{grid-template-columns:5vw 1fr;padding:1.5vh 1.6vw 1.5vh 0;width:auto;margin:0}
-  body.tv.vid .head{font-size:1.45vw;line-height:1.3}
-  body.tv.vid .sub{font-size:1vw}
-  body.tv.vid .age{font-size:1vw;padding-right:.8vw}
+  body.tv.vid .head{font-size:1.3vw;line-height:1.28}
+  body.tv.vid .sub{font-size:.9vw}
+  body.tv.vid .age{font-size:.9vw;padding-right:.7vw}
   body.tv.vid .pager{display:none}
 
   /* ticker: twice the size, half the speed */
@@ -302,10 +316,14 @@
     border-top:2px solid var(--line);overflow:hidden;white-space:nowrap;
     padding:1.6vh 0;font-size:2.7vw;
   }
-  body.tv.vid .tickin{display:inline-block;padding-left:100%;animation:tick 150s linear infinite}
+  /* The old version padded a full screen-width of nothing in front of the
+     text, so it looked like the banner started halfway through. The content
+     is written twice, so translating exactly half loops seamlessly with no
+     gap at either end. */
+  body.tv.vid .tickin{display:inline-block;white-space:nowrap;animation:tick 150s linear infinite}
   body.tv.vid .tickin b{color:var(--lamp);font-weight:600}
   body.tv.vid .tickin span{padding:0 3vw;color:#A6B6C6}
-  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
   body.tv .pager{
     position:fixed;bottom:2.5vh;left:0;right:0;text-align:center;
@@ -342,6 +360,8 @@ window.setTimeout(function(){
   <p style="color:#8496A8;margin:0">The page needs a browser from roughly 2017 or later. On a TV, try the
   built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
 </div>
+
+<button id="tvexit" aria-label="Leave display mode">Exit</button>
 
 <div id="pull"><span>Pull to refresh</span></div>
 
@@ -1647,7 +1667,7 @@ function detectDevice(){
 const DEVICE = detectDevice();
 const TV = PARAMS.tv === '0' ? false : (PARAMS.tv ? true : DEVICE === 'tv');
 const TV_DWELL = 18000;
-const perPage = () => state.video ? 4 : 6;
+const perPage = () => state.video ? 9 : 6;
 let tvPage = 0;
 
 function tvLink(){
@@ -1987,7 +2007,10 @@ function setVideo(v, name){
   save(); draw();
 }
 function drawTicker(rows){
-  const bits = rows.slice(0,14).map(function(c){
+  /* Quakes and weather alerts have their own tab and were dominating the
+     banner — a magnitude 4 in Chile is not what the shop wants scrolling. */
+  const bits = rows.filter(function(c){ return !c.cats.has('hazard') && !c.wx; })
+    .slice(0,14).map(function(c){
     const n = c.sources.size;
     return '<span>' + (flagged(c) || hot(c) ? '<b>' + esc(c.rep.title) + '</b>' : esc(c.rep.title))
       + (n>1 ? '  \u00B7 ' + n + ' outlets' : '') + '</span>';
@@ -2920,6 +2943,11 @@ $('#report').onclick = ()=>{
   try{ document.execCommand('copy'); $('#report').textContent = 'Copied — paste it to Claude'; }
   catch(e){ $('#report').textContent = 'Select and copy from the box below'; ta.style.cssText = 'width:100%;height:120px'; return; }
   document.body.removeChild(ta);
+};
+
+$('#tvexit').onclick = ()=>{
+  const base = location.href.split('?')[0].split('#')[0];
+  location.href = base + '?tv=0';
 };
 
 $('#tvswap').onclick = ()=>{
