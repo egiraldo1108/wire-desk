@@ -807,7 +807,7 @@ function save(){
          which is how one wrong stream kept reappearing across reloads. Only
          streams you pasted yourself are kept. */
       playing:state.playing, manualIds:state.manualIds, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels, ghToken:state.ghToken
+      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels, ghToken:state.ghToken, badIds:state.badIds
     }));
   }catch(e){}
 }
@@ -832,6 +832,12 @@ function restore(){
     if (s.bskyOk) state.bskyOk = s.bskyOk;
     if (s.myChannels) state.myChannels = s.myChannels;
     if (s.ghToken){ state.ghToken = s.ghToken; $('#ghtoken').value = s.ghToken; }
+    if (s.badIds){
+      /* Rejections lapse after a day — a channel restarting could in
+         principle reuse nothing, but the list shouldn't grow forever. */
+      const cut = Date.now() - 24*HOUR;
+      Object.keys(s.badIds).forEach(function(k){ if (s.badIds[k] > cut) state.badIds[k] = s.badIds[k]; });
+    }
     /* Ids saved before the live-only fix may be clips rather than streams,
        so they're dropped once. */
     if (s.manualIds){
@@ -869,6 +875,7 @@ const state = {
   restoredY: 0,
   mountedSrc: '',        // what the iframe is currently showing
   ghToken: '',           // device-local, never written to the repo
+  badIds: {},            // stream ids you marked wrong -> when
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
   bskyOk: {},            // handle -> does it exist
@@ -1064,7 +1071,7 @@ async function loadLiveMap(){
          it is recent. A build from hours ago is full of video ids for streams
          that have since restarted — those play nothing, which is exactly what
          a stale schedule looks like from the outside. */
-      if (rec.video && rec.live && Date.now() - LIVE_AT < STREAM_TTL){
+      if (rec.video && rec.live && !rejected(rec.video) && Date.now() - LIVE_AT < STREAM_TTL){
         state.liveIds = state.liveIds || {};
         state.liveAt = state.liveAt || {};
         state.liveIds[rec.chan] = rec.video;
@@ -1121,6 +1128,8 @@ function buildFresh(){ return LIVE_AT && (Date.now() - LIVE_AT < 90*60*1000); }
    window threw away perfectly good status information. */
 const STATUS_TTL = 8*HOUR;          // is this channel broadcasting at all
 const STREAM_TTL = 90*60*1000;      // is this specific stream id still alive
+
+const rejected = id => !!(id && state.badIds && state.badIds[id]);
 
 function liveNow(entry){
   if (!LIVEMAP) return null;                       // no build at all
@@ -1817,9 +1826,9 @@ async function currentLive(chanId){
     const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
     if (!owner || owner[1] !== chanId) return '';
     let m = /"videoId":"([\w-]{11})"/.exec(html);
-    if (m) return m[1];
+    if (m) return rejected(m[1]) ? '' : m[1];
     m = /watch\?v=([\w-]{11})/.exec(html);
-    if (m) return m[1];
+    if (m) return rejected(m[1]) ? '' : m[1];
   }catch(e){}
   return '';
 }
@@ -1848,6 +1857,7 @@ function setVideo(v, name){
       + '<select id="pbarpick" class="pbarsel" aria-label="Switch channel">'
       + channelOptions(state.videoName || 'Live') + '</select>'
       + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
+      + '<button id="pbad">Wrong stream</button>'
       + '<button id="ppin">' + (state.pinned ? 'Unpin' : 'Pin') + '</button>'
       + '<button id="pstop">Stop</button></div>';
   };
@@ -1872,6 +1882,8 @@ function setVideo(v, name){
     };
     const sel = document.getElementById('pbarpick');
     if (sel) sel.onchange = function(){ pickChannel(sel.value); };
+    const bad = document.getElementById('pbad');
+    if (bad) bad.onclick = function(e){ e.preventDefault(); rejectStream(); };
     box.classList.toggle('unpinned', !state.pinned);
   };
   /* Nothing loads until you ask it to. An iframe that never resolves is
@@ -2207,6 +2219,50 @@ function hashOf(str){
   let h = 0;
   for (let i = 0; i < str.length; i++){ h = ((h<<5) - h + str.charCodeAt(i)) | 0; }
   return h;
+}
+
+/* "That's not the live stream." Blacklists whatever is playing so nothing
+   offers it again, looks for a replacement straight away, and — if a token
+   is set — asks the agent for a fresh build so the fix reaches every device. */
+async function rejectStream(){
+  const v = state.video;
+  if (!v) return;
+  const bad = state.mountedSrc ? (/embed\/([\w-]{11})/.exec(state.mountedSrc) || [])[1] : null;
+  const note = $('#vidnote');
+
+  if (bad){
+    state.badIds[bad] = Date.now();
+    if (state.liveIds && state.liveIds[v] === bad) delete state.liveIds[v];
+    if (state.manualIds && state.manualIds[v]) delete state.manualIds[v];
+    save();
+  }
+  if (note) note.textContent = 'Marked wrong. Looking for the real stream…';
+  state.mountedSrc = '';
+
+  /* Ask the agent to rebuild, so other devices get the correction too. */
+  if (state.ghToken){
+    timedFetch('https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches',
+      15000, { method:'POST', headers:{
+        'Accept':'application/vnd.github+json', 'Authorization':'Bearer ' + state.ghToken,
+        'X-GitHub-Api-Version':'2022-11-28', 'Content-Type':'application/json'
+      }, body: JSON.stringify({ ref:'main' }) }).catch(function(){});
+  }
+
+  if (v.indexOf('c:') === 0){
+    try{
+      const id = await currentLive(v.slice(2));
+      if (id && !rejected(id)){
+        state.liveIds[v] = id;
+        state.liveAt[v] = Date.now();
+        save();
+        if (note) note.textContent = 'Found a different stream.';
+        setVideo(v);
+        return;
+      }
+    }catch(e){}
+  }
+  if (note) note.textContent = "Couldn't find another stream for that channel.";
+  if (TV) cycleChannel(1); else setVideo(v);
 }
 
 /* Channels the build has confirmed are broadcasting. Cycling through these
@@ -3096,6 +3152,7 @@ $('#report').onclick = ()=>{
   document.body.removeChild(ta);
 };
 
+$('#tvbad').onclick = ()=> rejectStream();
 $('#tvprev').onclick = ()=> cycleChannel(-1);
 $('#tvnext').onclick = ()=> cycleChannel(1);
 
