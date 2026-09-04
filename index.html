@@ -270,14 +270,20 @@
   body.tv .state .why{font-size:1.6vw}
   /* Display mode hides every control, which left no way back out except
      editing the URL. */
-  #tvexit{display:none}
-  body.tv #tvexit{
-    display:block;position:fixed;top:1.4vh;right:1.4vw;z-index:60;
-    background:rgba(232,163,61,.16);border:2px solid var(--lamp);
-    color:var(--lamp);border-radius:4px;padding:1vh 1.8vw;
-    font-size:1.6vw;font-weight:600;cursor:pointer;
+  #tvbar{display:none}
+  body.tv #tvbar{
+    display:flex;align-items:center;gap:.8vw;
+    position:fixed;top:1.4vh;right:1.4vw;z-index:60;
   }
-  body.tv #tvexit:hover,body.tv #tvexit:focus{border-color:var(--lamp);color:var(--lamp)}
+  body.tv #tvbar button{
+    background:rgba(232,163,61,.16);border:2px solid var(--lamp);
+    color:var(--lamp);border-radius:4px;padding:.8vh 1.4vw;
+    font-size:1.6vw;font-weight:600;cursor:pointer;line-height:1;
+  }
+  body.tv #tvbar #tvprev,body.tv #tvbar #tvnext{padding:.8vh 1.6vw;font-size:2vw}
+  body.tv #tvbar button:hover,body.tv #tvbar button:focus{background:rgba(232,163,61,.34)}
+  body.tv #tvchan{color:var(--dim);font-size:1.2vw;max-width:16vw;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   /* video board: proper grid — video left, headlines right, ticker across
      the bottom. The old float-based version drifted at different screen
@@ -367,7 +373,12 @@ window.setTimeout(function(){
   built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
 </div>
 
-<button id="tvexit" aria-label="Leave display mode">✕ Exit</button>
+<div id="tvbar">
+  <button id="tvprev" aria-label="Previous channel">‹</button>
+  <span id="tvchan"></span>
+  <button id="tvnext" aria-label="Next channel">›</button>
+  <button id="tvexit" aria-label="Leave display mode">✕ Exit</button>
+</div>
 
 <div id="pull"><span>Pull to refresh</span></div>
 
@@ -1766,6 +1777,19 @@ function videoSrc(v){
    news channel is nearly always a two-minute clip — that's why several
    channels were playing videos instead of the live feed. A wrong stream is
    worse than none, so this now returns nothing rather than guessing. */
+/* YouTube's oEmbed endpoint answers 200 for a playable video and an error
+   for one that is gone, private, or not embeddable. It is public, CORS-clean
+   and needs no relay — so we can check BEFORE mounting instead of leaving
+   "Video unavailable" on the wall. */
+async function playable(videoId){
+  try{
+    const u = 'https://www.youtube.com/oembed?url='
+            + encodeURIComponent('https://www.youtube.com/watch?v=' + videoId) + '&format=json';
+    const r = await timedFetch(u, 7000);
+    return r.ok;
+  }catch(e){ return true; }        // can't tell — don't block on it
+}
+
 async function currentLive(chanId){
   try{
     const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
@@ -2168,6 +2192,42 @@ function hashOf(str){
   let h = 0;
   for (let i = 0; i < str.length; i++){ h = ((h<<5) - h + str.charCodeAt(i)) | 0; }
   return h;
+}
+
+/* Channels the build has confirmed are broadcasting. Cycling through these
+   avoids landing on a dead one, which in display mode shows as a black box
+   because the play button and off-air panel are both hidden there. */
+function liveChannels(){
+  /* A confirmed-live channel with a verified stream id is the only thing
+     guaranteed to play. Falling back to the channel embed is what produced
+     "Video unavailable" on the board, since there is nothing there to click
+     and nothing to explain it. */
+  const withId = allChannels().filter(function(e){
+    const key = e.v || (e.h && state.chans[e.h]);
+    return liveNow(e) === true && key && state.liveIds && state.liveIds[key];
+  });
+  if (withId.length) return withId;
+  const live = allChannels().filter(function(e){ return liveNow(e) === true; });
+  return live.length ? live : allChannels();
+}
+function currentIndex(list){
+  for (let i = 0; i < list.length; i++){
+    const e = list[i];
+    if ((e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video)) return i;
+  }
+  return -1;
+}
+function cycleChannel(dir){
+  const list = liveChannels();
+  if (!list.length) return;
+  const at = currentIndex(list);
+  const e = list[((at + dir) % list.length + list.length) % list.length];
+  state.playing = true;
+  if (e.v) setVideo(e.v, e.n);
+  else if (state.chans[e.h]) setVideo(state.chans[e.h], e.n);
+  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
+  const label = $('#tvchan');
+  if (label) label.textContent = e.n || '';
 }
 
 /* Step to the next live channel in the directory. Ones already resolved
@@ -2963,6 +3023,9 @@ $('#report').onclick = ()=>{
   document.body.removeChild(ta);
 };
 
+$('#tvprev').onclick = ()=> cycleChannel(-1);
+$('#tvnext').onclick = ()=> cycleChannel(1);
+
 $('#tvexit').onclick = ()=>{
   const base = location.href.split('?')[0].split('#')[0];
   location.href = base + '?tv=0';
@@ -3017,7 +3080,36 @@ if (TV){
   if (PARAMS.every) $('#interval').value = PARAMS.every;
   if (PARAMS.video) state.video = PARAMS.video;
   setInterval(function(){ tvPage++; draw(); }, TV_DWELL);
+  state.playing = true;              // the board has no play button to press
   if (state.video) setVideo(state.video);
+
+  /* If the channel we opened on isn't broadcasting, move to one that is
+     rather than sitting on a black rectangle. */
+  setTimeout(async function(){
+    const cur = allChannels().filter(function(e){
+      return e.v === state.video || state.chans[e.h] === state.video;
+    })[0];
+    if (!state.video || (cur && liveNow(cur) === false)){ cycleChannel(1); return; }
+
+    /* Confirm what we're about to show actually plays; if not, step on. */
+    const id = state.liveIds && state.liveIds[state.video];
+    if (id && !(await playable(id))) cycleChannel(1);
+
+    const label = $('#tvchan');
+    if (label && cur) label.textContent = state.videoName || cur.n || '';
+  }, 2500);
+
+  /* Re-check every few minutes. A stream that ends mid-broadcast turns into
+     "Video unavailable" and would otherwise stay there all day. */
+  setInterval(async function(){
+    const id = state.liveIds && state.liveIds[state.video];
+    if (id && !(await playable(id))) cycleChannel(1);
+  }, 5*60*1000);
+
+  /* Optional hands-free rotation: add &rotate=15 for a new channel
+     every 15 minutes. Off unless asked for. */
+  const rot = parseInt(PARAMS.rotate, 10);
+  if (rot > 0) setInterval(function(){ cycleChannel(1); }, rot * 60000);
   setInterval(draw, 30000);
 }
 
