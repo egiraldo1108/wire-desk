@@ -2,9 +2,12 @@ name: Build feeds
 
 on:
   schedule:
-    # Every 15 minutes. GitHub queues cron jobs, so expect a few minutes
-    # of drift at busy times — this is not a real-time guarantee.
-    - cron: '*/15 * * * *'
+    # Deliberately NOT */15 on the hour boundary. GitHub's free tier queues
+    # scheduled jobs and silently drops them under load, and the :00/:15/:30
+    # marks are the most contested minutes on the platform — asking for every
+    # 15 minutes there was reliably delivering one run every few hours.
+    # Odd minutes, four times an hour, lands far more of them.
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:        # lets you run it by hand from the Actions tab
   push:
     branches: [main]
