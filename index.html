@@ -268,30 +268,43 @@
   body.tv .state{padding:12vh 6vw;max-width:none}
   body.tv .state .lead{font-size:3vw}
   body.tv .state .why{font-size:1.6vw}
-  /* video board: player left, headlines right, ticker along the bottom */
+  /* video board: proper grid — video left, headlines right, ticker across
+     the bottom. The old float-based version drifted at different screen
+     widths, which is why it never quite lined up. */
   body.tv.vid{overflow:hidden}
-  body.tv.vid .stream{display:flex;flex-direction:column;height:100vh}
-  body.tv.vid .streamhead{padding:1.6vh 3vw 1.2vh;flex:none}
-  body.tv.vid #player{display:block;position:static;flex:none;width:63vw;float:left}
-  body.tv.vid #player .frame{padding-top:35.4vw}
-  body.tv.vid #player .pbar,body.tv.vid #player .poster{display:none}
-  body.tv.vid #list{overflow:hidden;flex:1 1 auto}
-  body.tv.vid .item{
-    grid-template-columns:6vw 1fr;padding:1.4vh 2vw 1.4vh 0;
-    width:37vw;margin-left:63vw;
+  body.tv.vid .stream{
+    display:grid;
+    grid-template-columns:60vw 1fr;
+    grid-template-rows:auto 1fr auto;
+    height:100vh;
   }
-  body.tv.vid .head{font-size:24px;font-size:1.35vw}
-  body.tv.vid .sub{font-size:16px;font-size:.95vw}
-  body.tv.vid .age{font-size:18px;font-size:1vw;padding-right:1vw}
+  body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh}
+  body.tv.vid #player{
+    grid-column:1;grid-row:2;position:static;align-self:start;
+    background:#000;
+  }
+  body.tv.vid #player .frame{padding-top:33.75vw}   /* 16:9 of 60vw */
+  body.tv.vid #player .pbar,body.tv.vid #player .poster,body.tv.vid #player .capture{display:none}
+  body.tv.vid #list{
+    grid-column:2;grid-row:2;overflow:hidden;
+    border-left:1px solid var(--line);
+  }
+  body.tv.vid .item{grid-template-columns:5vw 1fr;padding:1.5vh 1.6vw 1.5vh 0;width:auto;margin:0}
+  body.tv.vid .head{font-size:1.45vw;line-height:1.3}
+  body.tv.vid .sub{font-size:1vw}
+  body.tv.vid .age{font-size:1vw;padding-right:.8vw}
   body.tv.vid .pager{display:none}
+
+  /* ticker: twice the size, half the speed */
   body.tv.vid .ticker{
-    display:block;flex:none;background:var(--panel);
+    grid-column:1 / -1;grid-row:3;
+    display:block;background:var(--panel);
     border-top:2px solid var(--line);overflow:hidden;white-space:nowrap;
-    padding:1.4vh 0;font-size:24px;font-size:1.35vw;
+    padding:1.6vh 0;font-size:2.7vw;
   }
-  body.tv.vid .tickin{display:inline-block;padding-left:100%;animation:tick 70s linear infinite}
+  body.tv.vid .tickin{display:inline-block;padding-left:100%;animation:tick 150s linear infinite}
   body.tv.vid .tickin b{color:var(--lamp);font-weight:600}
-  body.tv.vid .tickin span{padding:0 2.5vw;color:#A6B6C6}
+  body.tv.vid .tickin span{padding:0 3vw;color:#A6B6C6}
   @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-100%)}}
 
   body.tv .pager{
@@ -383,6 +396,10 @@ window.setTimeout(function(){
       <h2>Live video</h2>
       <p class="hint" style="margin:0 0 9px">Sky News plays by default. More channels under Browse sources, or paste any YouTube live link.</p>
       <p class="hint" id="agentnote" style="margin:0 0 9px">Checking the build\u2026</p>
+      <details style="margin:0 0 9px">
+        <summary>Keep it playing while you read</summary>
+        <p>Tap the video, then the picture-in-picture button in the player controls. The stream pops out and floats over everything, so it keeps running while you open articles. A page can't start that itself — iOS only allows it from your tap — but once it's floating it survives you leaving the page entirely.</p>
+      </details>
       <div class="field">
         <input type="text" id="vidin" placeholder="Paste a YouTube live URL" aria-label="Live video URL">
         <button class="go" id="vidgo">Play</button>
@@ -994,7 +1011,7 @@ async function loadLiveMap(){
          it is recent. A build from hours ago is full of video ids for streams
          that have since restarted — those play nothing, which is exactly what
          a stale schedule looks like from the outside. */
-      if (rec.video && rec.live && Date.now() - LIVE_AT < 90*60*1000){
+      if (rec.video && rec.live && Date.now() - LIVE_AT < STREAM_TTL){
         state.liveIds = state.liveIds || {};
         state.liveAt = state.liveAt || {};
         state.liveIds[rec.chan] = rec.video;
@@ -1017,12 +1034,15 @@ function drawAgentNote(){
   const keys = Object.keys(LIVEMAP);
   const live = keys.filter(function(k){ return LIVEMAP[k].live; }).length;
   const age = LIVE_AT ? Math.round((Date.now() - LIVE_AT) / 60000) : null;
-  const stale = age !== null && age > 90;
+  const dead = age !== null && age > STATUS_TTL/60000;
+  const aging = age !== null && age > STREAM_TTL/60000;
   el.textContent = keys.length + ' channels resolved by the build'
     + (age !== null ? ' ' + (age < 1 ? 'just now' : (age < 90 ? age + 'm ago' : Math.round(age/60) + 'h ago')) : '')
     + ' \u00B7 ' + live + ' live'
-    + (stale ? ' \u2014 too old to trust, the schedule has stopped running.' : ' right now.');
-  el.style.color = stale ? 'var(--flag)' : '';
+    + (dead ? ' \u2014 stale, run the workflow by hand.'
+            : aging ? ' \u2014 stream links may have rotated; channels still known good.'
+                    : ' right now.');
+  el.style.color = dead ? 'var(--flag)' : '';
 }
 
 /* What the build knows about the channel currently loaded. */
@@ -1036,10 +1056,28 @@ function buildRec(v){
 }
 function buildFresh(){ return LIVE_AT && (Date.now() - LIVE_AT < 90*60*1000); }
 
+/* true = confirmed live, false = confirmed not usable, null = we have no build
+   data at all. Absent from a fresh build is NOT unknown: the agent looked and
+   could not verify that channel, so treating it as "unknown" and falling back
+   to the channel embed is what lets YouTube substitute someone else's stream. */
+/* Two different clocks, which I had wrongly merged into one:
+     - whether a channel is a 24/7 broadcaster barely changes, so this
+       judgement stays useful for hours;
+     - a live VIDEO id dies whenever the stream restarts, so it expires fast.
+   GitHub throttles free-tier cron to every few hours, so a single 90-minute
+   window threw away perfectly good status information. */
+const STATUS_TTL = 8*HOUR;          // is this channel broadcasting at all
+const STREAM_TTL = 90*60*1000;      // is this specific stream id still alive
+
 function liveNow(entry){
-  if (!LIVEMAP) return null;
+  if (!LIVEMAP) return null;                       // no build at all
+  if (LIVE_AT && Date.now() - LIVE_AT > STATUS_TTL) return null;
   const rec = LIVEMAP[entry.v || entry.h];
-  return rec ? !!rec.live : null;
+  if (!rec) return false;                          // the agent rejected it
+  /* Whether we have a stream id is a separate question. A channel confirmed
+     live is safe for the channel embed even without one — substitution only
+     happens when the channel is off air. */
+  return !!rec.live;
 }
 
 function prebuiltAge(){
@@ -1899,7 +1937,7 @@ function setVideo(v, name){
   const fromBuild = LIVEMAP && Object.keys(LIVEMAP).some(function(k){
     return LIVEMAP[k].chan === v && LIVEMAP[k].video === known;
   });
-  const maxAge = fromBuild ? 90*60*1000 : 12*HOUR;
+  const maxAge = fromBuild ? STREAM_TTL : 12*HOUR;
   if (known && savedAt && Date.now() - savedAt > maxAge) known = null;
 
   const entry = CATALOG.concat(state.myChannels || []).filter(function(x){
