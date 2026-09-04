@@ -272,10 +272,10 @@
      editing the URL. */
   #tvexit{display:none}
   body.tv #tvexit{
-    display:block;position:fixed;top:1.2vh;right:1.2vw;z-index:40;
-    background:rgba(22,32,44,.85);border:1px solid var(--line);
-    color:var(--dim);border-radius:3px;padding:.7vh 1.2vw;
-    font-size:1.1vw;cursor:pointer;
+    display:block;position:fixed;top:1.4vh;right:1.4vw;z-index:60;
+    background:rgba(232,163,61,.16);border:2px solid var(--lamp);
+    color:var(--lamp);border-radius:4px;padding:1vh 1.8vw;
+    font-size:1.6vw;font-weight:600;cursor:pointer;
   }
   body.tv #tvexit:hover,body.tv #tvexit:focus{border-color:var(--lamp);color:var(--lamp)}
 
@@ -290,9 +290,13 @@
     height:100vh;
   }
   body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh}
+  body.tv.vid #player.on,
   body.tv.vid #player{
-    grid-column:1;grid-row:2;position:static;
-    align-self:center;            /* sits lower, centred in its column */
+    grid-column:1;grid-row:2;
+    position:static !important;   /* beats the sticky rule from normal mode */
+    top:auto;
+    align-self:center;            /* centred vertically in its column */
+    margin:auto 0;
     background:#000;
   }
   body.tv.vid #player .frame{padding-top:37.1vw}   /* 16:9 of 66vw */
@@ -302,7 +306,9 @@
     border-left:1px solid var(--line);
     display:flex;flex-direction:column;justify-content:flex-start;
   }
-  body.tv.vid .item{flex:0 0 auto}
+  /* Each row shares the column height equally, so the list genuinely reaches
+     the bottom instead of stopping partway with dead space beneath it. */
+  body.tv.vid .item{flex:1 1 0;min-height:0;overflow:hidden;align-items:center}
   body.tv.vid .item{grid-template-columns:5vw 1fr;padding:1.5vh 1.6vw 1.5vh 0;width:auto;margin:0}
   body.tv.vid .head{font-size:1.3vw;line-height:1.28}
   body.tv.vid .sub{font-size:.9vw}
@@ -320,7 +326,7 @@
      text, so it looked like the banner started halfway through. The content
      is written twice, so translating exactly half loops seamlessly with no
      gap at either end. */
-  body.tv.vid .tickin{display:inline-block;white-space:nowrap;animation:tick 150s linear infinite}
+  body.tv.vid .tickin{display:inline-block;white-space:nowrap;animation:tick 240s linear infinite}
   body.tv.vid .tickin b{color:var(--lamp);font-weight:600}
   body.tv.vid .tickin span{padding:0 3vw;color:#A6B6C6}
   @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
@@ -361,7 +367,7 @@ window.setTimeout(function(){
   built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
 </div>
 
-<button id="tvexit" aria-label="Leave display mode">Exit</button>
+<button id="tvexit" aria-label="Leave display mode">✕ Exit</button>
 
 <div id="pull"><span>Pull to refresh</span></div>
 
@@ -1677,6 +1683,9 @@ function tvLink(){
               + (state.video ? '&video=' + encodeURIComponent(state.video) : '');
 }
 function drawTV(rows){
+  /* Hazards have their own tab. On the wall they crowd out real headlines,
+     so the board and the banner both leave them out. */
+  rows = rows.filter(function(c){ return !c.cats.has('hazard'); });
   const clock = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
   $('#next').textContent = '';
   const head = $('.streamhead');
