@@ -189,33 +189,47 @@ async function liveVideo(id) {
     await new Promise(r => setTimeout(r, 1200));
     res = await page(url);                                   // one retry
   }
+  const html = res.html || '';
+  if (/consent\.youtube\.com/.test(html)) return null;     // bot-check page: fail clean
 
   /* The strongest signal is the redirect itself: when a channel is on air,
      /live sends you to /watch?v=<the stream>. When it isn't, you stay on a
-     channel page. Earlier I was hunting for markers inside the HTML, which
-     YouTube does not always include for a server — hence "0 live" while
-     every channel was plainly broadcasting. */
+     channel page. */
   /* A redirect alone is not proof. When a channel is NOT streaming, YouTube
      often bounces /live to somebody else's recommended live video — which is
      how Bloomberg's stream and a Democracy Now video ended up standing in for
      half the list. The stream has to belong to the channel we asked for. */
   const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
   if (redirected) {
-    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(res.html || '');
+    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
     if (owner && owner[1] !== id) {
       return null;                       // somebody else's stream, discard
     }
-    if (owner) return { id: redirected[1], live: true, title: channelTitle(res.html) };
+    if (owner) {
+      const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
+      // A redirect to a scheduled premiere is not a live stream. isLiveNow is
+      // NOT required here — YouTube doesn't always include live markers for
+      // server fetches.
+      return { id: redirected[1], live: !offline, title: channelTitle(html) };
+    }
   }
 
-  if (res.html) {
-    const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(res.html);
-    const markers = /"isLiveNow"\s*:\s*true|"isLive"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"|"liveStreamability"/
-                      .test(res.html);
-    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(res.html);
+  /* No redirect (YouTube often serves the broadcast page directly with a 200):
+     the page's OWN video is the canonical link, falling back to the player's
+     videoDetails. Never the first bare "videoId" in the document — related
+     videos and ad slots sit earlier in the HTML, which is how NBC ended up
+     with France 24's stream and LiveNOW with Al Jazeera's. */
+  if (html) {
+    const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
+    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
     if (owner && owner[1] !== id) return null;          // not this channel's video
-    const m = /"videoId":"([\w-]{11})"/.exec(res.html);
-    if (m) return { id: m[1], live: markers && !offline, title: channelTitle(res.html) };
+    const m = /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})/i.exec(html)
+             || /"videoDetails":\{"videoId":"([\w-]{11})"/.exec(html);
+    // YouTube only points /live at a watch page for a real broadcast target
+    // (live or upcoming); a non-live channel gets its channel page, where the
+    // canonical is not a watch URL. Markers are NOT required — YouTube
+    // doesn't always include them for server fetches.
+    if (m) return { id: m[1], live: !offline, title: channelTitle(html) };
   }
   /* Deliberately no fallback to the newest upload. For a news channel that
      is almost always a short clip, and serving a clip in place of the live
