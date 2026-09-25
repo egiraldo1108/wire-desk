@@ -1121,12 +1121,14 @@ function drawAgentNote(){
   }
   const keys = Object.keys(LIVEMAP);
   const live = keys.filter(function(k){ return LIVEMAP[k].live; }).length;
+  const unknown = keys.filter(function(k){ return LIVEMAP[k].checked === false; }).length;
   const age = LIVE_AT ? Math.round((Date.now() - LIVE_AT) / 60000) : null;
   const dead = age !== null && age > STATUS_TTL/60000;
   const aging = age !== null && age > STREAM_TTL/60000;
-  el.textContent = keys.length + ' channels resolved by the build'
+  el.textContent = keys.length + ' channels checked by the build'
     + (age !== null ? ' ' + (age < 1 ? 'just now' : (age < 90 ? age + 'm ago' : Math.round(age/60) + 'h ago')) : '')
     + ' \u00B7 ' + live + ' live'
+    + (unknown ? ' \u00B7 ' + unknown + ' unknown' : '')
     + (dead ? ' \u2014 stale, run the workflow by hand.'
             : aging ? ' \u2014 stream links may have rotated; channels still known good.'
                     : ' right now.');
@@ -1144,10 +1146,13 @@ function buildRec(v){
 }
 function buildFresh(){ return LIVE_AT && (Date.now() - LIVE_AT < 90*60*1000); }
 
-/* true = confirmed live, false = confirmed not usable, null = we have no build
-   data at all. Absent from a fresh build is NOT unknown: the agent looked and
-   could not verify that channel, so treating it as "unknown" and falling back
-   to the channel embed is what lets YouTube substitute someone else's stream. */
+/* true = confirmed live, false = confirmed off-air, null = unknown.
+   Unknown covers: no build data, a stale build, a channel the build never
+   got to — and the important one, a check that failed outright (throttled,
+   consent-walled). A failed check is NOT "off air": the page falls back to
+   YouTube's own live_stream resolver and lets YouTube decide, instead of
+   telling you a live channel isn't broadcasting. Only a check that actually
+   ran and found nothing gets to say false. */
 /* Two different clocks, which I had wrongly merged into one:
      - whether a channel is a 24/7 broadcaster barely changes, so this
        judgement stays useful for hours;
@@ -1163,7 +1168,8 @@ function liveNow(entry){
   if (!LIVEMAP) return null;                       // no build at all
   if (LIVE_AT && Date.now() - LIVE_AT > STATUS_TTL) return null;
   const rec = LIVEMAP[entry.v || entry.h];
-  if (!rec) return false;                          // the agent rejected it
+  if (!rec) return null;                           // no data for this channel
+  if (rec.checked === false) return null;          // the check itself failed
   /* Whether we have a stream id is a separate question. A channel confirmed
      live is safe for the channel embed even without one — substitution only
      happens when the channel is off air. */
@@ -2120,7 +2126,11 @@ function setVideo(v, name){
      broadcast instead of nothing, which is how a four-hour replay ends up
      on screen pretending to be live. */
   const rec = buildRec(v);
-  if (rec && buildFresh() && !rec.live && state.forcePlay !== v){
+  /* Unknown (checked:false) must NOT trip this gate — only a confirmed
+     off-air build record refuses the embed. An unreadable check falls
+     through to the tri-state branch below, which mounts YouTube's own
+     live_stream resolver and lets YouTube decide. */
+  if (rec && buildFresh() && rec.checked !== false && !rec.live && state.forcePlay !== v){
     box.innerHTML = '<div class="pbar">'
       + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
       + channelOptions(state.videoName || 'Pick a channel') + '</select>'
@@ -2403,21 +2413,23 @@ async function rejectStream(){
   if (TV) cycleChannel(1); else setVideo(v);
 }
 
-/* Channels the build has confirmed are broadcasting. Cycling through these
-   avoids landing on a dead one, which in display mode shows as a black box
-   because the play button and off-air panel are both hidden there. */
+/* Channels worth trying on the board. Cycling through these avoids landing
+   on a dead one, which in display mode shows as a black box because the
+   play button and off-air panel are both hidden there. */
 function liveChannels(){
   /* A confirmed-live channel with a verified stream id is the only thing
-     guaranteed to play. Falling back to the channel embed is what produced
-     "Video unavailable" on the board, since there is nothing there to click
-     and nothing to explain it. */
+     guaranteed to play. */
   const withId = allChannels().filter(function(e){
     const key = e.v || (e.h && state.chans[e.h]);
     return liveNow(e) === true && key && state.liveIds && state.liveIds[key];
   });
   if (withId.length) return withId;
-  const live = allChannels().filter(function(e){ return liveNow(e) === true; });
-  return live.length ? live : allChannels();
+  /* Then anything not confirmed dark: confirmed-live channels, plus channels
+     whose check failed. A failed check is unknown, not off-air — the channel
+     embed lets YouTube itself decide, which beats a board cycling through
+     "off air" labels for channels that are plainly broadcasting. */
+  const maybe = allChannels().filter(function(e){ return liveNow(e) !== false; });
+  return maybe.length ? maybe : allChannels();
 }
 function currentIndex(list){
   for (let i = 0; i < list.length; i++){
