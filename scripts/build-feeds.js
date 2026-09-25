@@ -238,10 +238,17 @@ async function liveVideo(id) {
     // canonical is not a watch URL. Markers are NOT required — YouTube
     // doesn't always include them for server fetches.
     if (m) return { id: m[1], live: !offline, title: channelTitle(html) };
-    /* Loaded and parses, but points at no broadcast: an off-air channel's
-       /live is a channel page, not a stream. (Reaching here means the page
-       has video data, so this is a verdict, not a failed check.) */
-    return { id: '', live: false, title: channelTitle(html) };
+    /* Loaded and parses, but points at no broadcast. This is NOT a verdict:
+       YouTube serves datacenter IPs stripped or truncated pages that still
+       contain the string "videoId" (page chrome, ads, related slots) while
+       omitting the broadcast section — so a 24/7 channel like Sky News looks
+       "off air" here when it is plainly live. A page with no broadcast target
+       is absence of evidence, not evidence of absence: return null so the
+       caller records unknown and the page lets YouTube's own live_stream
+       resolver decide. Only positive evidence gets to say off air (our own
+       video carrying offline/upcoming markers, or a bounce to somebody
+       else's video). */
+    return null;
   }
   /* Deliberately no fallback to the newest upload. For a news channel that
      is almost always a short clip, and serving a clip in place of the live
