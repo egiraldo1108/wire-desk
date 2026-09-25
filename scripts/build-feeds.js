@@ -184,13 +184,18 @@ function channelTitle(html) {
 
 async function liveVideo(id) {
   const url = 'https://www.youtube.com/channel/' + id + '/live';
-  let res = await page(url);
-  if (res.html && !/"videoId"/.test(res.html)) {
-    await new Promise(r => setTimeout(r, 1200));
-    res = await page(url);                                   // one retry
+  // YouTube throttles bursts from server IPs: empty, walled, or truncated
+  // responses are retried with backoff before giving up. A channel that is
+  // genuinely off-air answers fine on the first try — only failures retry.
+  let res = { html: '', url: '' };
+  for (let a = 0; a < 3; a++) {
+    res = await page(url);
+    const h = res.html || '';
+    if (h && !/consent\.youtube\.com/.test(h) && /"videoId"/.test(h)) break;
+    await new Promise(r => setTimeout(r, 1500 * (a + 1)));
   }
   const html = res.html || '';
-  if (/consent\.youtube\.com/.test(html)) return null;     // bot-check page: fail clean
+  if (!html || /consent\.youtube\.com/.test(html)) return null;  // still walled: fail clean
 
   /* The strongest signal is the redirect itself: when a channel is on air,
      /live sends you to /watch?v=<the stream>. When it isn't, you stay on a
