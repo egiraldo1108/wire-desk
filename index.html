@@ -223,6 +223,23 @@
   }
   #player .pbar button:hover{border-color:var(--lamp);color:var(--lamp)}
   #player .pbar a{color:var(--lamp);margin-left:auto}
+  /* Minimized video: collapses to a slim bar so the audio keeps playing
+     while you read the stories. The iframe stays in the DOM, just 3px tall —
+     hiding it with display:none would kill the stream in some browsers. */
+  #player .pbar #pexpand,#player .pbar #pmininame{display:none}
+  #player.mini .frame{padding-top:0;height:3px;overflow:hidden}
+  #player.mini .poster,#player.mini .capture{display:none}
+  #player.mini .pbar #pbarpick,
+  #player.mini .pbar a,
+  #player.mini .pbar #pbad,
+  #player.mini .pbar #ppin,
+  #player.mini .pbar #pmin{display:none}
+  #player.mini .pbar #pexpand{display:inline-block}
+  #player.mini .pbar #pmininame{
+    display:inline-block;margin-right:auto;color:var(--dim);font-size:12.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;
+  }
+  #player.mini .pbar button{margin-left:0}
   #player .capture{padding:16px 14px 18px;background:#0B1119;text-align:center}
   #player .capture p{margin:0 0 10px;color:var(--dim);font-size:13px}
   #player .capture .chint{margin:14px 0 8px;font-size:12px}
@@ -251,7 +268,7 @@
   body.tv .stream{padding:0}
   body.tv .streamhead{
     padding:3vh 4vw 2vh;border-bottom:2px solid var(--line);
-    background:none;position:static;
+    background:none;position:static;align-items:center;
   }
   body.tv .count{font-size:40px;font-size:2.6vw}
   body.tv .streamhead .meta{font-size:22px;font-size:1.3vw}
@@ -271,14 +288,20 @@
   /* Display mode hides every control, which left no way back out except
      editing the URL. */
   #tvbar{display:none}
+  /* Docked into the header as its last item. It used to float fixed over the
+     header's top-right corner, where it landed on top of the clock. */
   body.tv #tvbar{
-    display:flex;align-items:center;gap:.8vw;
-    position:fixed;top:1.4vh;right:1.4vw;z-index:60;
+    display:flex;align-items:center;flex:none;
+    position:static;margin-left:auto;
+    background:rgba(8,12,18,.92);border:1px solid var(--line);border-radius:8px;
+    padding:.6vh .8vw;z-index:60;
   }
+  /* margin spacing instead of flex gap: old TV browsers don't do flex gap */
+  body.tv #tvbar>*+*{margin-left:.7vw}
   body.tv #tvbar button{
     background:rgba(232,163,61,.16);border:2px solid var(--lamp);
     color:var(--lamp);border-radius:4px;padding:.8vh 1.4vw;
-    font-size:1.6vw;font-weight:600;cursor:pointer;line-height:1;
+    font-size:1.6vw;font-weight:600;cursor:pointer;line-height:1;white-space:nowrap;
   }
   body.tv #tvbar #tvprev,body.tv #tvbar #tvnext{padding:.8vh 1.6vw;font-size:2vw}
   body.tv #tvbar button:hover,body.tv #tvbar button:focus{background:rgba(232,163,61,.34)}
@@ -295,7 +318,7 @@
     grid-template-rows:auto 1fr auto;
     height:100vh;
   }
-  body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh}
+  body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh;align-items:center}
   body.tv.vid #player.on,
   body.tv.vid #player{
     grid-column:1;grid-row:2;
@@ -1922,6 +1945,7 @@ function setVideo(v, name){
       + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
       + '<button id="pbad">Wrong stream</button>'
       + '<button id="ppin">' + (state.pinned ? 'Unpin' : 'Pin') + '</button>'
+      + '<button id="pmin">Minimize</button>'
       + '<button id="pstop">Stop</button></div>';
   };
   const mount = function(src){
@@ -1947,8 +1971,41 @@ function setVideo(v, name){
     if (sel) sel.onchange = function(){ pickChannel(sel.value); };
     const bad = document.getElementById('pbad');
     if (bad) bad.onclick = function(e){ e.preventDefault(); rejectStream(); };
+    const mn = document.getElementById('pmin');
+    if (mn) mn.onclick = function(e){ e.preventDefault(); setMini(true); };
     box.classList.toggle('unpinned', !state.pinned);
+    /* A channel switch rebuilds the bar; keep the mini bar if it was on. */
+    setMini(box.classList.contains('mini'));
   };
+  /* Minimize: collapse the video to a slim bar so the audio keeps playing
+     while you read the stories. Never rebuilds the iframe — that would
+     restart the stream. */
+  function setMini(on){
+    const bx = document.getElementById('player');
+    if (!bx) return;
+    bx.classList.toggle('mini', !!on);
+    const pb = bx.querySelector('.pbar');
+    let ex = document.getElementById('pexpand');
+    let nm = document.getElementById('pmininame');
+    if (on && pb){
+      if (!nm){
+        nm = document.createElement('span');
+        nm.id = 'pmininame';
+        pb.insertBefore(nm, pb.firstChild);
+      }
+      nm.textContent = state.videoName || 'Live';
+      if (!ex){
+        ex = document.createElement('button');
+        ex.id = 'pexpand';
+        ex.textContent = 'Expand';
+        ex.setAttribute('aria-label', 'Expand video');
+        ex.onclick = function(e){ e.preventDefault(); setMini(false); };
+        pb.insertBefore(ex, nm.nextSibling);
+      }
+    }
+    if (ex) ex.style.display = on ? '' : 'none';
+    if (nm) nm.style.display = on ? '' : 'none';
+  }
   /* Nothing loads until you ask it to. An iframe that never resolves is
      worse than a button that plainly says "not started yet". */
   /* Automation can't always get through. Rather than a dead player, this
@@ -3291,6 +3348,12 @@ $('#devnote').textContent = ({tv:'Television', phone:'Phone', tablet:'Tablet', d
 
 if (TV){
   document.body.classList.add('tv');
+  /* Dock the control cluster into the header as its last item. It used to
+     float fixed over the header's top-right corner, landing on top of the
+     clock with the buttons jumbled together. */
+  var tvbarEl = document.getElementById('tvbar');
+  var tvheadEl = document.querySelector('.streamhead');
+  if (tvbarEl && tvheadEl) tvheadEl.appendChild(tvbarEl);
   if (PARAMS.cats)  state.on = new Set(PARAMS.cats.split(',').filter(Boolean));
   if (PARAMS.words) $('#watch').value = PARAMS.words;
   if (PARAMS.every) $('#interval').value = PARAMS.every;
