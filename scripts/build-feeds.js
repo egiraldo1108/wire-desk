@@ -195,7 +195,10 @@ async function liveVideo(id) {
     await new Promise(r => setTimeout(r, 1500 * (a + 1)));
   }
   const html = res.html || '';
-  if (!html || /consent\.youtube\.com/.test(html)) return null;  // still walled: fail clean
+  /* Unreadable page (empty, consent-walled, or no video data at all after
+     retries): the check itself failed. Return null so the caller records
+     "unknown" — never "off air". A failed check must not become a verdict. */
+  if (!html || /consent\.youtube\.com/.test(html) || !/"videoId"/.test(html)) return null;
 
   /* The strongest signal is the redirect itself: when a channel is on air,
      /live sends you to /watch?v=<the stream>. When it isn't, you stay on a
@@ -207,9 +210,9 @@ async function liveVideo(id) {
   const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
   if (redirected) {
     const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    if (owner && owner[1] !== id) {
-      return null;                       // somebody else's stream, discard
-    }
+    /* Somebody else's stream: the page loaded fine, it just isn't ours.
+       If we were live, /live would have bounced to OUR video. */
+    if (owner && owner[1] !== id) return { id: '', live: false, title: channelTitle(html) };
     if (owner) {
       const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
       // A redirect to a scheduled premiere is not a live stream. isLiveNow is
@@ -227,7 +230,7 @@ async function liveVideo(id) {
   if (html) {
     const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
     const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    if (owner && owner[1] !== id) return null;          // not this channel's video
+    if (owner && owner[1] !== id) return { id: '', live: false, title: channelTitle(html) };
     const m = /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})/i.exec(html)
              || /"videoDetails":\{"videoId":"([\w-]{11})"/.exec(html);
     // YouTube only points /live at a watch page for a real broadcast target
@@ -235,6 +238,10 @@ async function liveVideo(id) {
     // canonical is not a watch URL. Markers are NOT required — YouTube
     // doesn't always include them for server fetches.
     if (m) return { id: m[1], live: !offline, title: channelTitle(html) };
+    /* Loaded and parses, but points at no broadcast: an off-air channel's
+       /live is a channel page, not a stream. (Reaching here means the page
+       has video data, so this is a verdict, not a failed check.) */
+    return { id: '', live: false, title: channelTitle(html) };
   }
   /* Deliberately no fallback to the newest upload. For a news channel that
      is almost always a short clip, and serving a clip in place of the live
@@ -289,44 +296,50 @@ async function buildLive() {
     await Promise.all(channels.slice(i, i + 3).map(async (e) => {
       const key = e.v || e.h;                      // how the page refers to it
       const raw = e.v ? e.v.slice(2) : e.h;
+      /* Tri-state honesty: a FAILED check records "unknown", never "off air".
+         The page treats unknown as "let YouTube decide" (channel embed);
+         only a check that actually ran gets to say live:false. */
+      const unknown = (why) => {
+        console.log(`  ${e.n}: ${why} — check failed, marking unknown`);
+        out[key] = { chan: e.v || e.h, video: '', live: false, checked: false, name: e.n };
+      };
       try {
         const cid = await channelId(raw);
-        if (!cid) { console.log(`  ${e.n}: could not resolve channel id (consent wall?)`); return; }
+        if (!cid) { unknown('could not resolve channel id (consent wall?)'); return; }
         if (VERIFY[key] && VERIFY[key] !== cid) {
-          console.log(`  ${e.n}: resolved ${cid} but expected ${VERIFY[key]} — skipping`);
-          return;
+          unknown(`resolved ${cid} but expected ${VERIFY[key]}`); return;
         }
         /* Guard against resolving to an unrelated channel entirely. */
         const realName = await channelName(cid);
         if (realName && !nameMatches(e.n, realName)) {
-          console.log(`  ${e.n}: resolved to "${realName}" (${cid}) — wrong channel, skipping`);
-          return;
+          unknown(`resolved to "${realName}" (${cid}) — wrong channel`); return;
         }
         const vid = await liveVideo(cid);
-        if (!vid) { console.log(`  ${e.n}: ${realName || cid} — not streaming`);
-          out[key] = { chan: 'c:' + cid, video: '', live: false, name: e.n };
-          return; }
-        out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, name: e.n };
+        if (!vid) { unknown(`${realName || cid} — page unreadable (throttled?)`); return; }
+        out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, checked: true, name: e.n };
         if (vid.live) live++;
-        console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'idle'} ${vid.id}  [${cid}${vid.title ? ' = ' + vid.title : ''}]`);
+        console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'off-air'} ${vid.id}  [${cid}${vid.title ? ' = ' + vid.title : ''}]`);
       } catch (err) {
-        console.log(`  ${e.n}: ${err.message}`);
+        unknown(err.message);
       }
     }));
   }
 
-  /* No carry-forward. This block used to copy the previous run's answer
-     for any channel that didn't resolve — but every correctness check added
-     since works by REJECTING a channel, which left the old, wrong entry to be
-     restored. Fixes could never take hold, and one wrong stream reappeared
-     no matter how many times it was fixed.
+  /* No carry-forward of stream ids. This block used to copy the previous
+     run's answer for any channel that didn't resolve — but every correctness
+     check added since works by REJECTING a channel, which left the old, wrong
+     entry to be restored. Fixes could never take hold, and one wrong stream
+     reappeared no matter how many times it was fixed.
 
-     A live stream id is worth minutes, not hours. If this run couldn't verify
-     a channel, the honest answer is that it has no stream right now — the
-     page falls back to the channel embed or says the channel is off air. */
+     A live stream id is worth minutes, not hours, so ids are still never
+     carried. What IS recorded for a failed check is checked:false —
+     "unknown", not "off air" — so the page stops telling you a throttled
+     channel isn't broadcasting and instead lets YouTube's own live_stream
+     resolver decide. */
 
-  fs.writeFileSync(LIVE, JSON.stringify({ built: Date.now(), v: 2, channels: out }));
-  console.log(`live: ${live} streaming now, ${Object.keys(out).length} channels resolved`);
+  fs.writeFileSync(LIVE, JSON.stringify({ built: Date.now(), v: 3, channels: out }));
+  const unk = Object.keys(out).filter(k => out[k].checked === false).length;
+  console.log(`live: ${live} streaming now, ${unk} unknown, ${Object.keys(out).length} channels resolved`);
 }
 
 (async () => {
