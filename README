@@ -132,7 +132,7 @@ Most foreign sources route through Google News' per-country feed (`hl=es-419&gl=
 
 ## Story feed and scrolling
 
-The **For you** tab is one continuous feed using the existing local-first ranking and source diversity. Section tabs, watchwords, alerts, custom feeds, location and saved settings still work.
+The **For you** tab is one continuous feed. Complete photo-and-synopsis previews lead each local/world group, with headline-only reports below them; local-first ranking, world quotas and source diversity still apply. Section tabs, watchwords, alerts, custom feeds, location and saved settings still work.
 
 **Pause scroll / Start scroll** controls hands-free vertical scrolling. Choose Slow, Normal or Fast. Touching, typing or manually scrolling pauses movement for 12 seconds; hovering over a story pauses it while reading. At the bottom, the feed waits five seconds and returns to the top. Reduced-motion settings disable automatic scrolling by default. Background refreshes preserve the visible story position.
 

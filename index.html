@@ -2042,7 +2042,12 @@ function visible(){
   const f = $('#filter').value.trim().toLowerCase();
   let out = [...state.clusters.values()].filter(c => !c.cats.has('hazard') && [...c.cats].some(x => state.on.has(x)));
   if (f) out = out.filter(c => (c.rep.title+' '+[...c.sources].join(' ')).toLowerCase().includes(f));
-  const ranked = applyQuota(diversify(out.sort((a,b) => score(b) - score(a)).slice(0,250)));
+  out.sort((a,b) => score(b) - score(a));
+  // Lead the illustrated feed with complete publisher previews. Keep the
+  // other headlines available below, plus the existing local/world quotas.
+  const complete = c => !!(c.rep.image && c.rep.summary);
+  const ranked = applyQuota(diversify(out.filter(complete))
+    .concat(diversify(out.filter(c => !complete(c))))).slice(0,250);
 
   /* Slot the forecast in below the top two headlines — high enough to see
      without scrolling, low enough that it never outranks breaking news.
