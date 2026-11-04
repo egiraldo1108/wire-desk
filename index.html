@@ -263,9 +263,6 @@
   .summary-missing{font-size:13px;color:var(--dim)}
   .story-media{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel);margin:0 0 12px;aspect-ratio:16 / 9}
   .story-media img{display:block;width:100%;height:100%;object-fit:cover}
-  .story-media.no-photo{aspect-ratio:auto;height:130px}
-  .story-media.no-photo img{object-fit:contain;opacity:.6}
-  .photo-note{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11px;color:#8496a8;letter-spacing:.03em}
   .story-footer{display:flex;gap:12px;justify-content:space-between;font-size:11px;color:var(--dim);line-height:1.6}
   .story-footer>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .read-story{color:var(--lamp);white-space:nowrap}
@@ -1962,15 +1959,14 @@ $('#scrollspeed').onchange = function(){ state.scrollSpeed = +this.value; save()
 ['wheel','touchstart','pointerdown','keydown'].forEach(function(type){
   window.addEventListener(type, pauseForReading, {passive:true});
 });
+const failedImages = new Set();
 $('#list').addEventListener('error', function(e){
   const img = e.target;
-  if (img.tagName !== 'IMG' || img.dataset.fallback) return;
-  img.dataset.fallback = 'true';
-  img.src = './story-placeholder.svg';
-  img.alt = 'Story photo unavailable';
-  const media = img.parentNode;
-  media.classList.add('no-photo');
-  if (!media.querySelector('.photo-note')) media.insertAdjacentHTML('beforeend','<span class="photo-note">Story photo unavailable</span>');
+  if (img.tagName !== 'IMG') return;
+  const media = img.closest('.story-media');
+  if (!media) return;
+  failedImages.add(img.src);
+  media.remove();
 }, true);
 function scrollFrame(now){
   const dt = Math.min((now - (scrollLast || now))/1000, .1);
@@ -2101,7 +2097,7 @@ function rowHTML(c, terms){
       <a class="story-link" href="${esc(safeURL(c.rep.link))}" target="_blank" rel="noopener noreferrer">
         <h2 class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</h2>
         <p class="synopsis ${summary?'':'summary-missing'}">${summary ? esc(summary) : 'Read the full report from ' + esc(source) + '. Summary unavailable.'}</p>
-        ${c.wx ? '' : `<div class="story-media ${image?'':'no-photo'}"><img src="${esc(image || './story-placeholder.svg')}" alt="${image ? esc(c.rep.imageAlt || c.rep.title) : 'No story photo provided'}" width="800" height="450" loading="lazy" decoding="async" referrerpolicy="no-referrer">${image?'':'<span class="photo-note">Story photo unavailable</span>'}</div>`}
+        ${!c.wx && image && !failedImages.has(image) ? `<div class="story-media"><img src="${esc(image)}" alt="${esc(c.rep.imageAlt || c.rep.title)}" width="800" height="450" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>` : ''}
         <span class="story-footer"><span>${n>1 ? '<span class="pickup">' + n + ' outlets</span> · ' + esc(otherSources) : esc(hostOf(c.rep.link))}</span><span class="read-story">Read story <span aria-hidden="true">↗</span></span></span>
       </a>
     </div></article>`;
