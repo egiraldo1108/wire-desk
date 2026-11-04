@@ -1,6 +1,6 @@
 # Wire Desk
 
-Single-file live news monitor. Drop `index.html` in a repo, turn on GitHub Pages, done. No build, no keys, no server.
+A scrolling news feed for GitHub Pages. Each story has its publisher, headline, short synopsis, photo and a link to the full report. No accounts or application server required.
 
 Tuned for three things at once: **breaking local (Rhode Island)**, **breaking world**, **politics and elections** — plus a slow lane of longer reads that never competes with them.
 
@@ -122,68 +122,33 @@ Outside the US, the local news query and weather still work; NWS alerts don't, s
 
 ## Browse sources
 
-A searchable directory of 60 free sources, no accounts anywhere. Type a country, a language, or an outlet name and tap to add.
+A searchable directory of free news sources, no accounts anywhere. Type a country, a language, or an outlet name and tap to add.
 
 **English international:** BBC, Guardian, Euronews, DW, France 24, Al Jazeera, CBC, ABC Australia, Channel News Asia, Times of India, Japan Times, Africanews, Kyiv Independent, plus country front pages for Nigeria, South Africa, Ireland and the Philippines.
 
 **Español:** Colombia gets the most coverage — country front page plus El Tiempo, El Espectador, Semana, Blu Radio, Noticias Caracol and El Colombiano. Also México, España, Argentina, Chile, Perú, Venezuela, Ecuador, República Dominicana, Puerto Rico and Cuba, plus BBC Mundo, DW Español, France 24 Español, CNN en Español, Infobae, El País, Univision and Telemundo. They land in their own **Español** category so you can toggle the whole language on and off.
 
-**Live video:** 17 channels including Sky News, Sky News Español, Al Jazeera, DW, France 24 (both languages), ABC, NBC, CBS, LiveNOW, Bloomberg, Euronews, RTVE, Noticias Caracol, El Tiempo and Milenio.
-
 Most foreign sources route through Google News' per-country feed (`hl=es-419&gl=CO&ceid=CO:es` and equivalents) rather than each outlet's own RSS path. One endpoint that's always valid beats guessing dozens of paths that move around — which is exactly the failure mode that broke feeds earlier.
 
-## Live video
+## Story feed and scrolling
 
-**Video works with nothing to set up.** Sky News plays by default on first open — its channel ID is baked in, so there's no lookup and no link to paste. Seventeen more live channels sit in **Browse sources**; each is looked up once and then remembered, so it's instant every time after.
+The **For you** tab is one continuous feed using the existing local-first ranking and source diversity. Section tabs, watchwords, alerts, custom feeds, location and saved settings still work.
 
-If you'd rather paste something else, **Live video** in the rail takes any YouTube URL. Five shapes work:
+**Pause scroll / Start scroll** controls hands-free vertical scrolling. Choose Slow, Normal or Fast. Touching, typing or manually scrolling pauses movement for 12 seconds; hovering over a story pauses it while reading. At the bottom, the feed waits five seconds and returns to the top. Reduced-motion settings disable automatic scrolling by default. Background refreshes preserve the visible story position.
 
-| You paste | What happens |
-|---|---|
-| `youtube.com/watch?v=…` | plays that specific stream |
-| `youtu.be/…` | same |
-| `youtube.com/live/…` | same |
-| `youtube.com/channel/UC…` | used directly |
-| `youtube.com/@handle` | looked up, then used |
+Publisher RSS descriptions provide the short synopsis. RSS media, image enclosures and embedded article images provide the photo. The scheduled feed builder also checks publisher preview metadata for a bounded number of stories missing either field. Google News headline lists and branding are not treated as article summaries or photos. A clearly labeled placeholder appears when the source has no usable photo; missing summaries are labeled rather than invented. Broken image URLs fall back to the same placeholder.
 
-**How it finds the stream.** It reads the channel's own `/live` page and pulls out the video ID currently being broadcast, then embeds that directly. YouTube's older `live_stream?channel=` endpoint is tried first but frequently answers "Video unavailable" even when a channel is plainly streaming, so it's only the fallback. The lookup re-runs on every load and again every 30 minutes, so restarts are picked up automatically. If it still won't play, an "Open it on YouTube" link appears under the player.
+The feed builder saves `t` (title), `l` (link), `d` (date), `s` (synopsis), `i` (image URL), and `p` (Google News publisher) for each story in `feeds.json`. Older headline-only cached files still load. Summaries and photos persist in the device's stream cache and are enriched on refresh.
 
-**It finds the current stream address for you.** Broadcasters restart their 24/7 streams every so often, which kills the video ID and leaves you with a dead player. So whatever you paste, the page reads that YouTube page and pulls out the channel's permanent ID. From then on the embed uses YouTube's `live_stream?channel=` form, which makes YouTube look up whatever that outlet is airing *at that moment*, on every single page load. Set it once and it keeps working.
+## Display mode
 
-If the lookup fails (relay throttled, say), it falls back to the specific stream you pasted and tells you plainly that this one will eventually go stale.
-
-Preset buttons for Sky News, DW, France 24, ABC News, NBC News and LiveNOW resolve the same way — they're stored as `@handles`, not IDs, so they can't rot. If a broadcaster ever renames their handle, paste their channel URL instead.
-
-Streams start muted, because every browser blocks autoplay with sound. Click the player to unmute. Tap **Off** to drop the video entirely and go back to a pure headline board.
-
-A note on the "free IPTV playlist" `.m3u8` links floating around: those are unlicensed restreams of pay channels. They break constantly and aren't worth wiring in. Everything above is a broadcaster's own player, embedded the way they intend.
-
-### Video on the TV board
-
-Add a video and `?tv=1` becomes a proper newsroom wall: stream on the left at about 63% width, the top headlines stacked down the right, and a scrolling ticker along the bottom carrying the hottest stories. Watchword hits and fast-moving stories show amber in the ticker.
-
-The **Get TV display link** button includes your video choice, so one URL sets up the whole board.
-
-## On a Samsung TV browser
-
-Yes — and there's a mode built for it. Add `?tv=1` to the URL and the page becomes a hands-off display board: controls gone, type sized for across-the-room reading, six stories per screen cycling every 18 seconds with page dots at the bottom, and a clock in the corner.
-
-Because a TV has its own empty storage and no realistic way to type settings, the board reads its config from the URL. Set everything up on your phone or laptop, hit **Get TV display link**, and it builds a URL with your categories and watchwords baked in:
+Add `?tv=1` or use **Switch to display mode** for a larger hands-free feed with images, synopses, a clock and pause/exit controls. The same continuous scrolling feed replaces the former video board and paginated headlines. The **Get TV display link** button includes categories and watchwords:
 
 ```
-https://you.github.io/wire/?tv=1&cats=local,wires,politics&words=fire,crash,outage
+https://egiraldo1108.github.io/wire-desk/?tv=1&cats=local,wires,politics&words=fire,crash,outage
 ```
 
-Type that once on the TV and it's set. Optional `&every=300` overrides the refresh interval.
-
-What to expect:
-
-- **Age matters a lot here.** Samsung's browser is Chromium, but an old one — a 2019 set might be on Chromium 63. The whole script is written without `?.` and `??` for that reason, since one unsupported character means a blank screen with no way to debug it. There's also an on-screen error banner instead of a console. Roughly 2017 and newer should run it; older than that, no promises.
-- **No notifications.** The TV browser doesn't do web notifications. TV mode is for watching, not alerting — sort order still puts hot and flagged stories on the first page, so what matters lands on screen anyway.
-- **It'll get killed eventually.** TV browsers are memory-tight and aggressive about unloading idle pages. Expect to reload it every day or two. Old items are pruned at 48 hours to keep memory flat, which helps.
-- **Burn-in.** On an OLED, don't leave a static bright page up for many hours. The cycling helps; the header doesn't move.
-- **Video in the TV browser is the shakiest part.** Tizen's YouTube iframe support is inconsistent — some sets play it fine, others stall or refuse. If yours won't cooperate, the TV's built-in YouTube app and Samsung TV Plus both carry these same channels free (Sky News and ABC News Live are on TV Plus), and they'll look far better than an embedded player. In that case run the board without video and let the TV handle the picture.
-- Links aren't clickable in TV mode — pointer events are off, since a remote can't usefully click a headline anyway.
+`?tv=0` forces the regular layout. `&every=300` sets the refresh interval. Existing saved video settings and old `video=` URLs are ignored; no video embeds or channel lookups run.
 
 ## Relays, in plain terms
 

@@ -1,382 +1,205 @@
 #!/usr/bin/env node
-/**
- * Wire Desk — feed builder.
- *
- * Runs on GitHub's servers, where there is no such thing as CORS. It fetches
- * every RSS feed listed in index.html and writes the results to feeds.json,
- * which the page then reads from its own domain. Same origin, so no browser
- * permission check, no middleman proxy, nothing to rate-limit you.
- *
- * No dependencies — Node 20's built-in fetch and a small XML reader.
- */
-
-const fs = require('fs');
-const path = require('path');
-
+/** Wire Desk's scheduled RSS builder. Publishes headlines, short publisher
+ * descriptions and story images to the same origin as the static app. */
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const ROOT = process.cwd();
-const HTML = path.join(ROOT, 'index.html');
 const OUT = path.join(ROOT, 'feeds.json');
-const LIVE = path.join(ROOT, 'live.json');
 
-/* ---------- pull the feed list straight out of the page ----------
-   One source of truth: add a feed to index.html and the builder picks
-   it up on the next run without being edited. */
 function readFeeds() {
-  const src = fs.readFileSync(HTML, 'utf8');
-  const script = src.split('<script>').pop().split('</script>')[0];
-
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const script = html.split('<script>').pop().split('</script>')[0];
   const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
   const GTOP = (hl, gl) => `https://news.google.com/rss?hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
-  const GSITE = (site, hl, gl) =>
-    `https://news.google.com/rss/search?q=${encodeURIComponent('site:' + site + ' when:2d')}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
-
-  const feedsSrc = script.match(/const FEEDS = (\[[\s\S]*?\n\]);/);
-  const catalogSrc = script.match(/const CATALOG = (\[[\s\S]*?\n\]);/);
-  if (!feedsSrc) throw new Error('could not find FEEDS in index.html');
-
-  const feeds = eval(feedsSrc[1]);
-  const catalog = catalogSrc ? eval(catalogSrc[1]) : [];
-
-  const urls = new Set();
-  feeds.forEach(f => { if (f.kind === 'rss' && f.url) urls.add(f.url); });
-  catalog.forEach(e => { if (e.k === 'rss' && e.u) urls.add(e.u); });
-  return [...urls];
+  const GSITE = (site, hl, gl) => `https://news.google.com/rss/search?q=${encodeURIComponent('site:' + site + ' when:2d')}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split('-')[0]}`;
+  const feeds = script.match(/const FEEDS = (\[[\s\S]*?\n\]);/);
+  const catalog = script.match(/const CATALOG = (\[[\s\S]*?\n\]);/);
+  if (!feeds) throw new Error('Could not find FEEDS in index.html');
+  const context = { GN, GTOP, GSITE };
+  const run = match => match ? vm.runInNewContext('(' + match[1] + ')', context, { timeout: 1000 }) : [];
+  return [...new Set([
+    ...run(feeds).filter(f => f.kind === 'rss').map(f => f.url),
+    ...run(catalog).filter(f => f.k === 'rss').map(f => f.u)
+  ].filter(Boolean))];
 }
 
-/* ---------- a small, forgiving XML reader ---------- */
-const strip = s => (s || '')
-  .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-  .replace(/<[^>]+>/g, '')
-  .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'")
-  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-  .replace(/\s+/g, ' ').trim();
-
-function tag(block, name) {
-  const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i').exec(block);
-  return m ? strip(m[1]) : '';
+function decode(value) {
+  return String(value || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&#(x[\da-f]+|\d+);/gi, (all, code) => {
+      const n = code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code);
+      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
+    })
+    .replace(/&quot;/gi, '"').replace(/&apos;|&#0?39;/gi, "'")
+    .replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
 }
-
-function linkOf(block) {
-  const href = /<link[^>]*href=["']([^"']+)["']/i.exec(block);
-  if (href) return href[1].trim();
-  const plain = /<link[^>]*>([\s\S]*?)<\/link>/i.exec(block);
-  if (plain) return strip(plain[1]);
-  return tag(block, 'guid');
+function plain(value) {
+  return decode(decode(value)).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
-
-function parse(xml) {
-  const out = [];
-  const blocks = xml.split(/<(?:item|entry)[\s>]/i).slice(1);
-  for (const raw of blocks) {
-    const block = '<item ' + raw.split(/<\/(?:item|entry)>/i)[0];
-    const t = tag(block, 'title');
-    if (!t) continue;
-    out.push({
-      t,
-      l: linkOf(block),
-      d: tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'updated') || ''
-    });
+function short(value, title) {
+  const text = plain(value);
+  if (!text || text.toLowerCase() === plain(title).toLowerCase()) return '';
+  if (text.length <= 300) return text;
+  return text.slice(0, 297).replace(/\s+\S*$/, '').trim() + '…';
+}
+function rawTag(block, name) {
+  const m = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}\\s*>`, 'i').exec(block);
+  return m ? m[1] : '';
+}
+function tag(block, name) { return plain(rawTag(block, name)); }
+function attrs(block) {
+  const out = {};
+  for (const m of block.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    out[m[1].toLowerCase()] = decode(m[2] === undefined ? m[3] : m[2]);
+  }
+  return out;
+}
+function safeURL(value, base) {
+  if (!value) return '';
+  try {
+    const u = new URL(decode(value).trim(), base);
+    if (!/^https?:$/.test(u.protocol)) return '';
+    if (u.protocol === 'http:') u.protocol = 'https:';
+    return u.href;
+  } catch { return ''; }
+}
+function linkOf(block, base) {
+  for (const m of block.matchAll(/<link\b[^>]*>/gi)) {
+    const a = attrs(m[0]);
+    if (a.href && (!a.rel || a.rel === 'alternate')) return safeURL(a.href, base);
+  }
+  return safeURL(tag(block, 'link') || tag(block, 'guid'), base);
+}
+function imageOf(block, base) {
+  const images = [];
+  for (const m of block.matchAll(/<(?:media:thumbnail|media:content|enclosure)\b[^>]*>/gi)) {
+    const a = attrs(m[0]);
+    if (!a.url || /^(audio|video)\//i.test(a.type || '') || /^(audio|video)$/i.test(a.medium || '')) continue;
+    if (/^<enclosure/i.test(m[0]) && !/^image\//i.test(a.type || '') && !/\.(png|jpe?g|webp)(\?|$)/i.test(a.url)) continue;
+    images.push({ url: safeURL(a.url, base), width: +a.width || 0 });
+  }
+  const rich = decode(rawTag(block, 'content:encoded') || rawTag(block, 'description') || rawTag(block, 'content') || rawTag(block, 'summary'));
+  for (const m of rich.matchAll(/<img\b[^>]*>/gi)) {
+    const a = attrs(m[0]);
+    if (+a.width === 1 || +a.height === 1) continue;
+    images.push({ url: safeURL(a['data-src'] || a.src, base), width: +a.width || 0 });
+  }
+  return images.filter(i => i.url).sort((a, b) => b.width - a.width)[0]?.url || '';
+}
+function parse(xml, feedURL) {
+  const out = [], google = /(^|\/)news\.google\.com\//i.test(feedURL || '');
+  for (const m of xml.matchAll(/<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)\s*>/gi)) {
+    const block = m[1], t = tag(block, 'title');
+    const l = linkOf(block, feedURL);
+    if (!t || !l) continue;
+    const summary = google ? '' : rawTag(block, 'description') || rawTag(block, 'summary') || rawTag(block, 'content:encoded') || rawTag(block, 'content');
+    out.push({ t, l, d: tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'updated') || tag(block, 'dc:date'),
+      s: short(summary, t), i: imageOf(block, l), p: google ? tag(block, 'source') : '' });
     if (out.length >= 40) break;
   }
   return out;
 }
 
-/* ---------- fetch with a timeout, a few at a time ---------- */
-async function grab(url) {
+async function fetchText(url, accept, timeout = 15000, maxBytes = 2_000_000) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 20000);
+  const timer = setTimeout(() => ctl.abort(), timeout);
   try {
-    const r = await fetch(url, {
-      signal: ctl.signal,
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; wire-desk/1.0; +https://github.com)',
-        'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
-      }
-    });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const body = await r.text();
-    const items = parse(body);
-    if (!items.length) throw new Error('no items');
-    return { ok: true, items };
-  } catch (e) {
-    return { ok: false, err: String(e.message || e) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function pool(urls, size, worker) {
-  const results = {};
-  let i = 0;
-  await Promise.all(Array.from({ length: size }, async () => {
-    while (i < urls.length) {
-      const url = urls[i++];
-      results[url] = await worker(url);
+    const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; WireDesk/2.0; +https://github.com/egiraldo1108/wire-desk)',
+      Accept: accept
+    }});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const reader = res.body.getReader();
+    const chunks = []; let size = 0;
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value)); size += value.length;
     }
+    await reader.cancel();
+    return { text: Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8'), url: res.url };
+  } finally { clearTimeout(timer); }
+}
+async function grab(url) {
+  try {
+    const res = await fetchText(url, 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*');
+    const items = parse(res.text, url);
+    if (!items.length) throw new Error('No feed items');
+    return { ok: true, items };
+  } catch (e) { return { ok: false, err: e.message }; }
+}
+async function pool(values, size, worker) {
+  const results = {}; let i = 0;
+  await Promise.all(Array.from({ length: Math.min(size, values.length) }, async () => {
+    while (i < values.length) { const value = values[i++]; results[value] = await worker(value); }
   }));
   return results;
 }
-
-/* ---------- live channel resolution ----------
-   The same trick as the feeds: YouTube blocks the browser, not a server.
-   Every channel in the catalog gets resolved here — handle to channel ID,
-   channel ID to whatever video is streaming right now — and written to
-   live.json. The page then reads it from its own domain, so the manual
-   copy-the-link-back step disappears. */
-async function page(url) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 20000);
-  try {
-    const r = await fetch(url, {
-      signal: ctl.signal,
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                    + '(KHTML, like Gecko) Chrome/122.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        /* YouTube serves datacenter IPs a cookie-consent wall instead of the
-           real page, and that wall contains no video data. These are the
-           cookies the consent screen would set if a person clicked through,
-           and they get the actual page returned. */
-        'Cookie': 'CONSENT=YES+cb; SOCS=CAI; PREF=hl=en&gl=US',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      }
-    });
-    if (!r.ok) return { html: '', url: '' };
-    return { html: await r.text(), url: r.url || url };
-  } catch (e) {
-    return { html: '', url: '' };
-  } finally { clearTimeout(timer); }
-}
-
-/* Grabbing the first "channelId" in the HTML was wrong: a channel page is
-   full of them — recommended channels, sidebar videos, promoted content —
-   and the page's own id is rarely the first one. That's how NinjaTrader,
-   TraderTV and Smooth Trader all ended up pointing at somebody's church
-   stream. The canonical link is the page's own identity and nothing else's. */
-async function channelId(handleOrId) {
-  if (/^UC[\w-]{20,}$/.test(handleOrId)) return handleOrId;
-  const res = await page('https://www.youtube.com/' + handleOrId);
-  const html = res.html || '';
-
-  let m = /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{20,})["']/i.exec(html);
-  if (m) return m[1];
-
-  m = /<meta[^>]+property=["']og:url["'][^>]+content=["']https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{20,})["']/i.exec(html);
-  if (m) return m[1];
-
-  /* channelMetadataRenderer describes the channel being viewed, unlike a
-     bare "channelId" which could belong to anything on the page. */
-  m = /"channelMetadataRenderer":\{[\s\S]{0,400}?"externalId":"(UC[\w-]{20,})"/.exec(html);
-  if (m) return m[1];
-
-  return '';
-}
-
-/* Read the channel's own name back, so a wrong match is visible in the log
-   instead of silently playing the wrong station. */
-function channelTitle(html) {
-  let m = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']{2,80})["']/i.exec(html || '');
-  return m ? m[1] : '';
-}
-
-async function liveVideo(id) {
-  const url = 'https://www.youtube.com/channel/' + id + '/live';
-  // YouTube throttles bursts from server IPs: empty, walled, or truncated
-  // responses are retried with backoff before giving up. A channel that is
-  // genuinely off-air answers fine on the first try — only failures retry.
-  let res = { html: '', url: '' };
-  for (let a = 0; a < 3; a++) {
-    res = await page(url);
-    const h = res.html || '';
-    if (h && !/consent\.youtube\.com/.test(h) && /"videoId"/.test(h)) break;
-    await new Promise(r => setTimeout(r, 1500 * (a + 1)));
+function metadata(html, base) {
+  const tags = {};
+  for (const m of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const a = attrs(m[0]);
+    if (a.content) tags[(a.property || a.name || '').toLowerCase()] = a.content;
   }
-  const html = res.html || '';
-  /* Unreadable page (empty, consent-walled, or no video data at all after
-     retries): the check itself failed. Return null so the caller records
-     "unknown" — never "off air". A failed check must not become a verdict. */
-  if (!html || /consent\.youtube\.com/.test(html) || !/"videoId"/.test(html)) return null;
+  return { s: short(tags['og:description'] || tags['twitter:description'] || tags.description),
+    i: safeURL(tags['og:image'] || tags['twitter:image'], base) };
+}
 
-  /* The strongest signal is the redirect itself: when a channel is on air,
-     /live sends you to /watch?v=<the stream>. When it isn't, you stay on a
-     channel page. */
-  /* A redirect alone is not proof. When a channel is NOT streaming, YouTube
-     often bounces /live to somebody else's recommended live video — which is
-     how Bloomberg's stream and a Democracy Now video ended up standing in for
-     half the list. The stream has to belong to the channel we asked for. */
-  const redirected = /[?&]v=([\w-]{11})/.exec(res.url || '');
-  if (redirected) {
-    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    /* Somebody else's stream: the page loaded fine, it just isn't ours.
-       If we were live, /live would have bounced to OUR video. */
-    if (owner && owner[1] !== id) return { id: '', live: false, title: channelTitle(html) };
-    if (owner) {
-      const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
-      // A redirect to a scheduled premiere is not a live stream. isLiveNow is
-      // NOT required here — YouTube doesn't always include live markers for
-      // server fetches.
-      return { id: redirected[1], live: !offline, title: channelTitle(html) };
+async function main() {
+  const urls = readFeeds();
+  console.log(`Fetching ${urls.length} feeds with story summaries and images`);
+  let previous = {};
+  try { previous = JSON.parse(fs.readFileSync(OUT, 'utf8')).items || {}; } catch {}
+  const cached = new Map(Object.values(previous).flat().map(item => [item.l, item]));
+  const got = await pool(urls, 8, grab);
+  const items = {}; let ok = 0;
+  for (const url of urls) {
+    const result = got[url];
+    if (result.ok) { items[url] = result.items; ok++; }
+    else if (previous[url]) items[url] = previous[url];
+    if (!result.ok) console.log(`  Kept previous data: ${url} (${result.err})`);
+    for (const item of items[url] || []) {
+      const old = cached.get(item.l);
+      if (old) { item.s ||= old.s || ''; item.i ||= old.i || ''; }
     }
   }
 
-  /* No redirect (YouTube often serves the broadcast page directly with a 200):
-     the page's OWN video is the canonical link, falling back to the player's
-     videoDetails. Never the first bare "videoId" in the document — related
-     videos and ad slots sit earlier in the HTML, which is how NBC ended up
-     with France 24's stream and LiveNOW with Al Jazeera's. */
-  if (html) {
-    const offline = /LIVE_STREAM_OFFLINE|"isUpcoming"\s*:\s*true/.test(html);
-    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    if (owner && owner[1] !== id) return { id: '', live: false, title: channelTitle(html) };
-    const m = /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})/i.exec(html)
-             || /"videoDetails":\{"videoId":"([\w-]{11})"/.exec(html);
-    // YouTube only points /live at a watch page for a real broadcast target
-    // (live or upcoming); a non-live channel gets its channel page, where the
-    // canonical is not a watch URL. Markers are NOT required — YouTube
-    // doesn't always include them for server fetches.
-    if (m) return { id: m[1], live: !offline, title: channelTitle(html) };
-    /* Loaded and parses, but points at no broadcast. This is NOT a verdict:
-       YouTube serves datacenter IPs stripped or truncated pages that still
-       contain the string "videoId" (page chrome, ads, related slots) while
-       omitting the broadcast section — so a 24/7 channel like Sky News looks
-       "off air" here when it is plainly live. A page with no broadcast target
-       is absence of evidence, not evidence of absence: return null so the
-       caller records unknown and the page lets YouTube's own live_stream
-       resolver decide. Only positive evidence gets to say off air (our own
-       video carrying offline/upcoming markers, or a bounce to somebody
-       else's video). */
-    return null;
-  }
-  /* Deliberately no fallback to the newest upload. For a news channel that
-     is almost always a short clip, and serving a clip in place of the live
-     feed is worse than serving nothing — the page can fall back to
-     YouTube's own live_stream resolver instead. */
-  return null;
-}
-
-/* Channel ids confirmed by hand. If a lookup disagrees with one of these,
-   the lookup is wrong and the entry is dropped rather than trusted. */
-const VERIFY = {
-  'c:UCoMdktPbSTixAyNGwb-UYkQ': 'UCoMdktPbSTixAyNGwb-UYkQ',
-  'c:UCNye-wNBqNL5ZzHSJj3l8Bg': 'UCNye-wNBqNL5ZzHSJj3l8Bg',
-  'c:UCzG5BnqHO8oNlrPDW9CYJog': 'UCzG5BnqHO8oNlrPDW9CYJog',
-  'c:UCknLrEdhRCp1aegoMqRaCZg': 'UCknLrEdhRCp1aegoMqRaCZg',
-  'c:UCQfwfsi5VrQ8yKZ-UWmAEFg': 'UCQfwfsi5VrQ8yKZ-UWmAEFg'
-};
-
-/* Loose name comparison: "NinjaTrader" vs "NinjaTrader", "Smooth Trader TV"
-   vs "SmoothTraderTV". Enough to catch a completely wrong channel without
-   tripping over punctuation and spacing. */
-function norm(x) {
-  return String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-function nameMatches(expected, actual) {
-  const a = norm(expected), b = norm(actual);
-  if (!a || !b) return true;                  // nothing to compare, don't block
-  if (a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return true;
-  const tokens = String(expected).toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 4);
-  return tokens.some(t => b.indexOf(t) >= 0);
-}
-
-/* The channel's own RSS feed states its title. Cheap, and it can't be
-   confused by anything else on a rendered page. */
-async function channelName(id) {
-  const res = await page('https://www.youtube.com/feeds/videos.xml?channel_id=' + id);
-  const m = /<title>([^<]{1,80})<\/title>/.exec(res.html || '');
-  return m ? m[1].trim() : '';
-}
-
-async function buildLive() {
-  const src = fs.readFileSync(HTML, 'utf8');
-  const script = src.split('<script>').pop().split('</script>')[0];
-  const GN = () => '', GTOP = () => '', GSITE = () => '';
-  const catalogSrc = script.match(/const CATALOG = (\[[\s\S]*?\n\]);/);
-  if (!catalogSrc) return;
-  const channels = eval(catalogSrc[1]).filter(e => e.k === 'yt');
-
-  const out = {};
-  let live = 0;
-  for (let i = 0; i < channels.length; i += 3) {
-    await Promise.all(channels.slice(i, i + 3).map(async (e) => {
-      const key = e.v || e.h;                      // how the page refers to it
-      const raw = e.v ? e.v.slice(2) : e.h;
-      /* Tri-state honesty: a FAILED check records "unknown", never "off air".
-         The page treats unknown as "let YouTube decide" (channel embed);
-         only a check that actually ran gets to say live:false. */
-      const unknown = (why) => {
-        console.log(`  ${e.n}: ${why} — check failed, marking unknown`);
-        out[key] = { chan: e.v || e.h, video: '', live: false, checked: false, name: e.n };
-      };
-      try {
-        const cid = await channelId(raw);
-        if (!cid) { unknown('could not resolve channel id (consent wall?)'); return; }
-        if (VERIFY[key] && VERIFY[key] !== cid) {
-          unknown(`resolved ${cid} but expected ${VERIFY[key]}`); return;
-        }
-        /* Guard against resolving to an unrelated channel entirely. */
-        const realName = await channelName(cid);
-        if (realName && !nameMatches(e.n, realName)) {
-          unknown(`resolved to "${realName}" (${cid}) — wrong channel`); return;
-        }
-        const vid = await liveVideo(cid);
-        if (!vid) { unknown(`${realName || cid} — page unreadable (throttled?)`); return; }
-        out[key] = { chan: 'c:' + cid, video: vid.live ? vid.id : '', live: vid.live, checked: true, name: e.n };
-        if (vid.live) live++;
-        console.log(`  ${e.n}: ${vid.live ? 'LIVE' : 'off-air'} ${vid.id}  [${cid}${vid.title ? ' = ' + vid.title : ''}]`);
-      } catch (err) {
-        unknown(err.message);
+  // Bound metadata work; Google's redirect-page branding is not a story image.
+  const targets = new Map();
+  for (const [url, stories] of Object.entries(items)) {
+    if (new URL(url).hostname === 'news.google.com') continue;
+    for (const item of stories.slice(0, 5)) {
+      if ((!item.i || !item.s) && safeURL(item.l) && new URL(item.l).hostname !== 'news.google.com') {
+        if (!targets.has(item.l)) targets.set(item.l, []);
+        targets.get(item.l).push(item);
       }
-    }));
+      if (targets.size >= 100) break;
+    }
+    if (targets.size >= 100) break;
   }
-
-  /* No carry-forward of stream ids. This block used to copy the previous
-     run's answer for any channel that didn't resolve — but every correctness
-     check added since works by REJECTING a channel, which left the old, wrong
-     entry to be restored. Fixes could never take hold, and one wrong stream
-     reappeared no matter how many times it was fixed.
-
-     A live stream id is worth minutes, not hours, so ids are still never
-     carried. What IS recorded for a failed check is checked:false —
-     "unknown", not "off air" — so the page stops telling you a throttled
-     channel isn't broadcasting and instead lets YouTube's own live_stream
-     resolver decide. */
-
-  fs.writeFileSync(LIVE, JSON.stringify({ built: Date.now(), v: 3, channels: out }));
-  const unk = Object.keys(out).filter(k => out[k].checked === false).length;
-  console.log(`live: ${live} streaming now, ${unk} unknown, ${Object.keys(out).length} channels resolved`);
-}
-
-(async () => {
-  const urls = readFeeds();
-  console.log(`fetching ${urls.length} feeds`);
-
-  const got = await pool(urls, 8, grab);
-
-  const items = {};
-  let ok = 0, failed = [];
-  for (const [url, r] of Object.entries(got)) {
-    if (r.ok) { items[url] = r.items; ok++; }
-    else failed.push(`${url} -> ${r.err}`);
-  }
-
-  /* Keep whatever worked last time for anything that failed this run, so a
-     single flaky fetch doesn't blank out a source on the page. */
-  if (fs.existsSync(OUT)) {
+  console.log(`Checking publisher previews for ${targets.size} stories`);
+  await pool([...targets.keys()], 6, async url => {
     try {
-      const prev = JSON.parse(fs.readFileSync(OUT, 'utf8'));
-      for (const url of Object.keys(prev.items || {})) {
-        if (!items[url]) items[url] = prev.items[url];
-      }
-    } catch (e) { /* previous file unreadable; carry on */ }
+      const res = await fetchText(url, 'text/html', 6000, 400_000);
+      const meta = metadata(res.text, res.url);
+      for (const item of targets.get(url)) { item.s ||= short(meta.s, item.t); item.i ||= meta.i; }
+    } catch { /* Optional metadata never blocks publishing the headlines. */ }
+  });
+
+  const key = title => plain(title).toLowerCase().replace(/\s+-\s+[^-]{2,40}$/, '').replace(/[^a-z0-9]/g, '');
+  const media = new Map();
+  for (const item of Object.values(items).flat()) if (item.i && item.s) media.set(key(item.t), item);
+  for (const item of Object.values(items).flat()) {
+    const match = media.get(key(item.t));
+    if (match) { item.s ||= match.s; item.i ||= match.i; }
   }
-
+  const stories = Object.values(items).flat();
+  if (!stories.length) throw new Error('No feeds available; refusing to overwrite feeds.json');
   fs.writeFileSync(OUT, JSON.stringify({ built: Date.now(), items }));
-  console.log(`ok ${ok}/${urls.length}, wrote ${Object.keys(items).length} feeds`);
-  if (failed.length) console.log('failed:\n  ' + failed.join('\n  '));
+  console.log(`Fetched ${ok}/${urls.length} feeds; saved ${stories.length} stories, ${stories.filter(i => i.i).length} photos, ${stories.filter(i => i.s).length} synopses`);
+}
 
-  console.log('resolving live channels');
-  await buildLive();
-})();
+module.exports = { parse, imageOf, metadata, safeURL, plain, readFeeds, main };
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

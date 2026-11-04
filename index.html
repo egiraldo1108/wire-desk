@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Wire Desk">
 <meta name="theme-color" content="#0F1620">
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.js">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
@@ -189,78 +189,6 @@
     input[type=text],input[type=url]{font-size:16px}  /* stops iOS zoom-on-focus */
     select{font-size:16px}
   }
-  /* ---------- live video ---------- */
-  #player{display:none;background:#000}
-  #player.on{display:block;position:sticky;top:0;z-index:9}
-  #player.on.unpinned{position:static}
-  #player.on.shut{position:static;background:transparent}
-  #player .frame{position:relative;width:100%;
-    padding-top:56.25%;              /* fallback for older browsers */
-    padding-top:min(56.25%,34vh);    /* keep it from eating the screen */
-  }
-  #player iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}
-  #player .poster{
-    position:relative;width:100%;padding-top:56.25%;padding-top:min(56.25%,34vh);
-    background:#0B1119;border-bottom:1px solid var(--line);
-  }
-  #player .poster button{
-    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    background:var(--lamp);color:#151A20;border:none;border-radius:999px;
-    padding:13px 26px;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;
-  }
-  #player .poster button:hover{background:#F2B355}
-  #player .pbar{
-    display:flex;align-items:center;gap:10px;padding:7px 12px;
-    background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);
-  }
-  #player .pbarsel{
-    background:var(--ink);border:1px solid var(--line);border-radius:3px;
-    color:var(--text);padding:5px 8px;font-size:13px;max-width:52%;
-  }
-  #player .pbar button{
-    margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--dim);
-    border-radius:3px;padding:4px 11px;font-size:12.5px;cursor:pointer;
-  }
-  #player .pbar button:hover{border-color:var(--lamp);color:var(--lamp)}
-  #player .pbar a{color:var(--lamp);margin-left:auto}
-  /* Minimized video: collapses to a slim bar so the audio keeps playing
-     while you read the stories. The iframe stays in the DOM, just 3px tall —
-     hiding it with display:none would kill the stream in some browsers. */
-  #player .pbar #pexpand,#player .pbar #pmininame{display:none}
-  #player.mini .frame{padding-top:0;height:3px;overflow:hidden}
-  #player.mini .poster,#player.mini .capture{display:none}
-  #player.mini .pbar #pbarpick,
-  #player.mini .pbar a,
-  #player.mini .pbar #pbad,
-  #player.mini .pbar #ppin,
-  #player.mini .pbar #pmin{display:none}
-  #player.mini .pbar #pexpand{display:inline-block}
-  #player.mini .pbar #pmininame{
-    display:inline-block;margin-right:auto;color:var(--dim);font-size:12.5px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;
-  }
-  #player.mini .pbar button{margin-left:0}
-  #player .capture{padding:16px 14px 18px;background:#0B1119;text-align:center}
-  #player .capture p{margin:0 0 10px;color:var(--dim);font-size:13px}
-  #player .capture .chint{margin:14px 0 8px;font-size:12px}
-  #player .capture .cgo{
-    display:inline-block;background:var(--lamp);color:#151A20;text-decoration:none;
-    border:none;border-radius:3px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;
-  }
-  #player .capture .cgo.alt{background:transparent;color:var(--lamp);border:1px solid var(--lamp)}
-  #player .capture input{
-    display:block;width:100%;margin-top:10px;background:var(--ink);
-    border:1px solid var(--line);border-radius:3px;padding:9px 10px;
-    color:var(--text);font-size:16px;
-  }
-  @media (max-width:480px){
-    #player .pbar{gap:7px;padding:6px 9px}
-    #player .pbar button{padding:4px 8px;font-size:12px}
-    #player .pbarsel{font-size:16px;max-width:46%}   /* 16px stops iOS zooming */
-  }
-  .streamhead{}
-  .ticker{display:none}
-
   /* ---------- TV mode: ?tv=1 ---------- */
   body.tv{overflow:hidden;font-size:20px}
   body.tv .rail,body.tv .mobilebar,body.tv .bar,body.tv #tabs{display:none}
@@ -308,63 +236,78 @@
   body.tv #tvchan{color:var(--dim);font-size:1.2vw;max-width:16vw;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-  /* video board: proper grid — video left, headlines right, ticker across
-     the bottom. The old float-based version drifted at different screen
-     widths, which is why it never quite lined up. */
-  body.tv.vid{overflow:hidden}
-  body.tv.vid .stream{
-    display:grid;
-    grid-template-columns:66vw 1fr;
-    grid-template-rows:auto 1fr auto;
-    height:100vh;
+  /* Story feed: publisher, short context and a full-width photo. */
+  .shell{grid-template-columns:292px minmax(0,780px);justify-content:center}
+  .rail{padding:26px 22px 60px}
+  .stream{min-width:0;border-right:1px solid var(--line)}
+  .streamhead{padding:24px 28px 18px;align-items:center}
+  .count{font-size:26px}
+  .streamhead .meta{font-size:12px}
+  #status{width:100%;order:4}
+  #tabs{padding:0 12px;scrollbar-width:none}
+  .feed-controls{display:flex;align-items:center;gap:8px;padding:12px 24px;border-bottom:1px solid var(--line);position:sticky;top:44px;z-index:5;background:var(--ink)}
+  .feed-label{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;margin-right:auto}
+  .live-dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .scroll-toggle{background:transparent;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .scroll-toggle[aria-pressed=true]{border-color:#716044;color:var(--lamp)}
+  #scrollspeed{font-size:12px;border-radius:999px;max-width:95px}
+  .item,body.tv .item{display:grid;grid-template-columns:38px minmax(0,1fr);gap:12px;padding:24px;align-items:start;pointer-events:auto;overflow-anchor:auto}
+  .item:hover{background:#121c28}
+  .source-avatar{width:38px;height:38px;border-radius:50%;background:hsl(var(--avatar-hue),24%,23%);color:hsl(var(--avatar-hue),45%,80%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;letter-spacing:.03em}
+  .story-body{min-width:0}
+  .story-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin:0 0 7px;line-height:1.5}
+  .source-name{font-size:13px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+  .story-section{color:var(--lamp);font-size:11px;border:1px solid #3d382e;border-radius:4px;padding:0 5px}
+  .head,body.tv .head{font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:600;font-size:20px;line-height:1.35;max-width:none;margin:0 0 8px;overflow-wrap:anywhere}
+  .synopsis{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;font-size:14.5px;line-height:1.6;color:#acbdce;margin:0 0 14px;overflow-wrap:anywhere}
+  .summary-missing{font-size:13px;color:var(--dim)}
+  .story-media{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel);margin:0 0 12px;aspect-ratio:16 / 9}
+  .story-media img{display:block;width:100%;height:100%;object-fit:cover}
+  .story-media.no-photo{aspect-ratio:auto;height:130px}
+  .story-media.no-photo img{object-fit:contain;opacity:.6}
+  .photo-note{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11px;color:#8496a8;letter-spacing:.03em}
+  .story-footer{display:flex;gap:12px;justify-content:space-between;font-size:11px;color:var(--dim);line-height:1.6}
+  .story-footer>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .read-story{color:var(--lamp);white-space:nowrap}
+  .story-link{display:block}
+  .story-link:hover .head{color:#fff}
+  .flagged .head{color:#E49D84}
+  .fresh{font-size:10px;vertical-align:middle}
+  body.tv{overflow:auto}
+  body.tv .stream{max-width:1040px;margin:0 auto;padding:0 0 50px;border-left:1px solid var(--line)}
+  body.tv .streamhead{padding:24px;position:sticky;top:0;background:var(--ink);z-index:10}
+  body.tv .count{font-size:28px}
+  body.tv .streamhead .meta,body.tv #wx{font-size:14px}
+  body.tv .tvclock{font-size:26px}
+  body.tv #tvbar{margin:0 0 0 auto;padding:6px;gap:8px}
+  body.tv #tvbar button{font-size:14px;padding:10px 14px}
+  body.tv .item{padding:32px;grid-template-columns:48px minmax(0,1fr);gap:16px}
+  body.tv .source-avatar{width:48px;height:48px;font-size:15px}
+  body.tv .head{font-size:29px}
+  body.tv .synopsis{font-size:20px}
+  body.tv .story-meta,body.tv .source-name{font-size:17px}
+  body.tv .story-footer{font-size:15px}
+  body.tv .story-media{max-height:460px}
+  body.tv .feed-controls{display:none}
+  @media(min-width:821px){.rail{margin-left:0}.shell{max-width:1072px;margin:0 auto;border-left:1px solid var(--line)}}
+  @media(max-width:820px){
+    .shell{display:block}
+    .stream{border-right:0}
+    .mobilebar{height:58px}
+    #tabs{top:58px}
+    .streamhead{padding:18px 16px 14px}
+    .feed-controls{padding:11px 16px;top:102px}
+    .item{grid-template-columns:32px minmax(0,1fr);gap:10px;padding:20px 16px}
+    .source-avatar{width:32px;height:32px;font-size:10px}
+    .head{font-size:18px}
+    .synopsis{font-size:14px;line-height:1.55}
+    .story-media{border-radius:12px}
+    .story-meta{gap:5px;font-size:11px}
+    .source-name{font-size:12px}
+    .story-footer{font-size:10px}
+    .feed-label{font-size:11px}
   }
-  body.tv.vid .streamhead{grid-column:1 / -1;grid-row:1;padding:1.4vh 3vw 1vh;align-items:center}
-  body.tv.vid #player.on,
-  body.tv.vid #player{
-    grid-column:1;grid-row:2;
-    position:static !important;   /* beats the sticky rule from normal mode */
-    top:auto;
-    align-self:center;            /* centred vertically in its column */
-    margin:auto 0;
-    background:#000;
-  }
-  body.tv.vid #player .frame{padding-top:37.1vw}   /* 16:9 of 66vw */
-  body.tv.vid #player .pbar,body.tv.vid #player .poster,body.tv.vid #player .capture{display:none}
-  body.tv.vid #list{
-    grid-column:2;grid-row:2;overflow:hidden;
-    border-left:1px solid var(--line);
-    display:flex;flex-direction:column;justify-content:flex-start;
-  }
-  /* Each row shares the column height equally, so the list genuinely reaches
-     the bottom instead of stopping partway with dead space beneath it. */
-  body.tv.vid .item{flex:1 1 0;min-height:0;overflow:hidden;align-items:center}
-  body.tv.vid .item{grid-template-columns:5vw 1fr;padding:1.5vh 1.6vw 1.5vh 0;width:auto;margin:0}
-  body.tv.vid .head{font-size:1.3vw;line-height:1.28}
-  body.tv.vid .sub{font-size:.9vw}
-  body.tv.vid .age{font-size:.9vw;padding-right:.7vw}
-  body.tv.vid .pager{display:none}
-
-  /* ticker: twice the size, half the speed */
-  body.tv.vid .ticker{
-    grid-column:1 / -1;grid-row:3;
-    display:block;background:var(--panel);
-    border-top:2px solid var(--line);overflow:hidden;white-space:nowrap;
-    padding:1.6vh 0;font-size:2.7vw;
-  }
-  /* The old version padded a full screen-width of nothing in front of the
-     text, so it looked like the banner started halfway through. The content
-     is written twice, so translating exactly half loops seamlessly with no
-     gap at either end. */
-  body.tv.vid .tickin{display:inline-block;white-space:nowrap;animation:tick 240s linear infinite}
-  body.tv.vid .tickin b{color:var(--lamp);font-weight:600}
-  body.tv.vid .tickin span{padding:0 3vw;color:#A6B6C6}
-  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-
-  body.tv .pager{
-    position:fixed;bottom:2.5vh;left:0;right:0;text-align:center;
-    color:#3A4C60;font-size:1.1vw;letter-spacing:.4em;
-  }
-
+  @media(max-width:380px){.feed-label{max-width:90px}.story-section{display:none}.item{padding:18px 12px;gap:8px}}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -393,14 +336,11 @@ window.setTimeout(function(){
 <div id="tooold" style="display:none;padding:40px 24px;font:16px/1.5 sans-serif;color:#DCE4ED">
   <p style="font-size:22px;margin:0 0 10px">This browser is too old to run Wire Desk.</p>
   <p style="color:#8496A8;margin:0">The page needs a browser from roughly 2017 or later. On a TV, try the
-  built-in YouTube or news apps instead; on a computer or phone, updating the browser will fix it.</p>
+  built-in news apps instead; on a computer or phone, updating the browser will fix it.</p>
 </div>
 
 <div id="tvbar">
-  <button id="tvprev" aria-label="Previous channel">‹</button>
-  <span id="tvchan"></span>
-  <button id="tvnext" aria-label="Next channel">›</button>
-  <button id="tvbad" aria-label="Wrong stream">Wrong</button>
+  <button id="tvpause" aria-pressed="false">Pause scroll</button>
   <button id="tvexit" aria-label="Leave display mode">✕ Exit</button>
 </div>
 
@@ -410,7 +350,7 @@ window.setTimeout(function(){
 
   <aside class="rail">
     <div class="brand"><span class="pulse"></span><h1>Wire Desk</h1></div>
-    <p class="tagline">Rhode Island, world, politics. Clustered by how many outlets are running it.</p>
+    <p class="tagline">Your news, as it happens. Local stories, world headlines, and the context behind them.</p>
 
     <div class="block">
       <h2>Alerts</h2>
@@ -457,28 +397,6 @@ window.setTimeout(function(){
     </div>
 
     <div class="block">
-      <h2>Live video</h2>
-      <p class="hint" style="margin:0 0 9px">Sky News plays by default. More channels under Browse sources, or paste any YouTube live link.</p>
-      <p class="hint" id="agentnote" style="margin:0 0 9px">Checking the build\u2026</p>
-      <details style="margin:0 0 9px">
-        <summary>Keep it playing while you read</summary>
-        <p>Tap the video, then the picture-in-picture button in the player controls. The stream pops out and floats over everything, so it keeps running while you open articles. A page can't start that itself — iOS only allows it from your tap — but once it's floating it survives you leaving the page entirely.</p>
-      </details>
-      <div class="field">
-        <input type="text" id="vidin" placeholder="Paste a YouTube live URL" aria-label="Live video URL">
-        <button class="go" id="vidgo">Play</button>
-      </div>
-      <select id="vidpick" style="width:100%;margin-top:8px" aria-label="Pick a live channel"></select>
-      <button class="btn" id="vidoff" style="margin-top:6px">Turn video off</button>
-      <p class="hint" id="vidnote" style="min-height:1em"></p>
-      <div id="mychans" style="margin-top:8px"></div>
-      <details>
-        <summary>Getting a link for any channel</summary>
-        <p>Open the channel on YouTube, click its live stream, copy the address bar. Works with <code>watch?v=…</code>, <code>youtu.be/…</code>, <code>/live/…</code>, or a <code>/channel/UC…</code> URL — a channel link auto-follows whatever they're streaming right now, so it never goes stale. Free 24/7 news channels: Sky News, DW News, France 24 English, ABC News Live, CBS News, NBC News NOW, LiveNOW from FOX, Bloomberg.</p>
-      </details>
-    </div>
-
-    <div class="block">
       <h2>Your area</h2>
       <p class="hint" style="margin:0 0 9px">Detected: <span id="locnote">checking…</span></p>
       <div class="field">
@@ -496,11 +414,9 @@ window.setTimeout(function(){
         <button class="chip" data-cf="all" aria-pressed="true">All</button>
         <button class="chip" data-cf="en">English</button>
         <button class="chip" data-cf="es">Español</button>
-        <button class="chip" data-cf="yt">Live video</button>
-        <button class="chip" data-cf="mk">Markets</button>
       </div>
       <div id="catalog" style="margin-top:10px;max-height:280px;overflow-y:auto"></div>
-      <p class="hint">Free, no accounts. Sources abroad route through Google News' per-country feed, which is far steadier than each outlet's own RSS.</p>
+      <p class="hint">News feeds, free with no accounts. Sources abroad route through Google News' per-country feed, which is far steadier than each outlet's own RSS.</p>
     </div>
 
     <div class="block">
@@ -584,7 +500,6 @@ window.setTimeout(function(){
   </aside>
 
   <main class="stream">
-    <div id="player"></div>
     <div class="streamhead">
       <span class="count" id="count">—</span>
       <span class="meta" id="status">Loading…</span>
@@ -593,8 +508,12 @@ window.setTimeout(function(){
     </div>
     <div class="bar"><i id="prog"></i></div>
     <nav id="tabs" aria-label="Sections"></nav>
-    <div id="list"></div>
-    <div id="ticker" class="ticker"><div class="tickin" id="tickin"></div></div>
+    <div class="feed-controls">
+      <span class="feed-label"><span class="live-dot" aria-hidden="true"></span> Live story feed</span>
+      <button id="scrolltoggle" class="scroll-toggle" aria-pressed="true">Pause scroll</button>
+      <select id="scrollspeed" aria-label="Scroll speed"><option value="12">Slow</option><option value="24" selected>Normal</option><option value="40">Fast</option></select>
+    </div>
+    <div id="list" aria-label="News stories"></div>
   </main>
 </div>
 
@@ -731,11 +650,6 @@ async function relayFetch(url){
    works — swap for mstdn.social, mas.to, etc. */
 const MASTODON = 'https://mastodon.social';
 
-/* Sky News' channel ID, verified. The out-of-the-box stream, so video
-   works on first open with nothing to paste. Channel IDs never change,
-   and YouTube resolves the current live stream itself on every load. */
-const DEFAULT_VIDEO = 'c:UCoMdktPbSTixAyNGwb-UYkQ';
-
 const GN = q => `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
 
 /* Google News publishes a top-stories feed for every country and language
@@ -828,53 +742,30 @@ function save(){
     localStorage.setItem(KEY, JSON.stringify({
       on:[...state.on], watches:state.watches, custom:state.custom,
       words:$('#watch').value, interval:$('#interval').value, sound:$('#sound').checked,
-      video:state.video, chans:state.chans, loc:state.loc, myRelay:state.myRelay,
-      /* liveIds are NOT persisted. They come from live.json on every load,
-         so saving them only lets a bad build poison the device for good —
-         which is how one wrong stream kept reappearing across reloads. Only
-         streams you pasted yourself are kept. */
-      playing:state.playing, manualIds:state.manualIds, videoName:state.videoName,
-      pinned:state.pinned, tab:state.tab, seen:state.seen, bskyOk:state.bskyOk, vfix:4, myChannels:state.myChannels, ghToken:state.ghToken, badIds:state.badIds
+      loc:state.loc, myRelay:state.myRelay, tab:state.tab, seen:state.seen,
+      bskyOk:state.bskyOk, ghToken:state.ghToken,
+      autoScroll:state.autoScroll, scrollSpeed:state.scrollSpeed
     }));
   }catch(e){}
 }
 function restore(){
   try{
-    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (!s) return;
-    if (s.on) state.on = new Set(s.on);
-    if (s.watches) state.watches = s.watches;
-    if (s.custom) state.custom = s.custom;
-    if (s.words) $('#watch').value = s.words;
-    if (s.interval) $('#interval').value = s.interval;
-    if (s.sound) $('#sound').checked = true;
-    if (s.video) state.video = s.video;
-    if (s.chans) state.chans = s.chans;
-    if (s.loc) state.loc = s.loc;
-    if (s.myRelay){ state.myRelay = s.myRelay; $('#myrelay').value = s.myRelay; }
-    if (s.playing) state.playing = true;
-    if (s.pinned === false) state.pinned = false;
-    if (s.tab) state.tab = s.tab;
-    if (s.seen) state.seen = s.seen;
-    if (s.bskyOk) state.bskyOk = s.bskyOk;
-    if (s.myChannels) state.myChannels = s.myChannels;
-    if (s.ghToken){ state.ghToken = s.ghToken; $('#ghtoken').value = s.ghToken; }
-    if (s.badIds){
-      /* Rejections lapse after a day — a channel restarting could in
-         principle reuse nothing, but the list shouldn't grow forever. */
-      const cut = Date.now() - 24*HOUR;
-      Object.keys(s.badIds).forEach(function(k){ if (s.badIds[k] > cut) state.badIds[k] = s.badIds[k]; });
-    }
-    /* Ids saved before the live-only fix may be clips rather than streams,
-       so they're dropped once. */
-    if (s.manualIds){
-      state.manualIds = s.manualIds;
-      Object.keys(s.manualIds).forEach(function(k){
-        state.liveIds[k] = s.manualIds[k].id;
-        state.liveAt[k] = s.manualIds[k].at;
-      });
-    }
-    if (s.videoName) state.videoName = s.videoName;
+    const old = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (!old) return;
+    if (old.on) state.on = new Set(old.on);
+    if (old.watches) state.watches = old.watches;
+    if (old.custom) state.custom = old.custom;
+    if (old.words) $('#watch').value = old.words;
+    if (old.interval) $('#interval').value = old.interval;
+    if (old.sound) $('#sound').checked = true;
+    if (old.loc) state.loc = old.loc;
+    if (old.myRelay){ state.myRelay = old.myRelay; $('#myrelay').value = old.myRelay; }
+    if (old.tab) state.tab = old.tab;
+    if (old.seen) state.seen = old.seen;
+    if (old.bskyOk) state.bskyOk = old.bskyOk;
+    if (old.ghToken){ state.ghToken = old.ghToken; $('#ghtoken').value = old.ghToken; }
+    if (typeof old.autoScroll === 'boolean'){ state.autoScroll = old.autoScroll; state.scrollRestored = true; }
+    if ([12,24,40].indexOf(+old.scrollSpeed) >= 0) state.scrollSpeed = +old.scrollSpeed;
     state.restored = true;
   }catch(e){}
 }
@@ -887,28 +778,16 @@ const state = {
   custom: [],
   on: new Set(DEFAULT_ON),
   query: '',
-  video: '',
-  chans: {},             // '@handle' -> 'c:UC…', cached after first lookup
   loc: null,             // {lat, lon, city, region, zip, how}
-  myRelay: '',           // user-hosted proxy, tried before all others
-  playing: false,        // video only loads once you press play
-  pinned: true,          // sticky player, toggled from the bar
-  videoName: '',
-  liveIds: {},           // channel -> last resolved live video id
-  liveAt: {},            // and when that was resolved
-  manualIds: {},         // only the streams you pasted by hand
-  myChannels: [],        // channels you pasted in yourself
-  forcePlay: '',         // channel you chose to watch despite being off air
+  myRelay: '',
   restoredY: 0,
-  mountedSrc: '',        // what the iframe is currently showing
   ghToken: '',           // device-local, never written to the repo
-  badIds: {},            // stream ids you marked wrong -> when
-  noStream: {},          // channels with nothing live, checked just now
+  autoScroll: false,     // enabled initially after device/motion detection
+  scrollSpeed: 24,       // pixels per second
   tab: 'all',            // active section tab
   seen: {},              // tab id -> when you last opened it
   bskyOk: {},            // handle -> does it exist
   bskyChecked: false,
-  resolving: false,
   forecast: [],          // two always-present forecast rows
   restored: false,
   primed: false,         // suppress alerts on first load
@@ -939,7 +818,12 @@ function dig(o){
 
 const $ = s => document.querySelector(s);
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const strip = h => { const d = document.createElement('div'); d.innerHTML = h||''; return (d.textContent||'').replace(/\s+/g,' ').trim(); };
+const strip = h => {
+  const t = document.createElement('template');
+  t.innerHTML = h || '';
+  t.content.querySelectorAll('script,style').forEach(function(n){ n.remove(); });
+  return (t.content.textContent || '').replace(/\s+/g,' ').trim();
+};
 const norm = t => (t||'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim().slice(0,90);
 const clip = (s,n) => s.length > n ? s.slice(0,n-1).trimEnd()+'\u2026' : s;
 const allFeeds = () => FEEDS.concat(state.custom).concat(locFeeds());
@@ -959,6 +843,46 @@ function stripe(ms){
 }
 const watchwords = () => $('#watch').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
 function hostOf(u){ try{ return new URL(u).hostname.replace(/^www\./,''); }catch(e){ return ''; } }
+
+function safeURL(value, base){
+  if (!value || typeof value !== 'string') return '';
+  try{
+    const u = new URL(value.trim(), base || location.href);
+    if (!/^https?:$/.test(u.protocol)) return '';
+    // Keep photo requests usable from an HTTPS GitHub Pages site.
+    if (u.protocol === 'http:') u.protocol = 'https:';
+    return u.href;
+  }catch(e){ return ''; }
+}
+function synopsis(value, title){
+  const text = strip(value || '');
+  if (!text || norm(text) === norm(title)) return '';
+  return clip(text, 300);
+}
+function feedTitle(value, url, publisher){
+  let title = strip(value);
+  if ((url || '').indexOf('news.google.com') >= 0){
+    const suffix = publisher ? ' - ' + publisher : '';
+    if (suffix && title.slice(-suffix.length) === suffix) title = title.slice(0,-suffix.length);
+    else title = title.replace(/^(.{20,}?)\s+-\s+([^-]{2,40})$/, '$1');
+  }
+  return title.trim();
+}
+function rssImage(el, rich, base){
+  const media = [...el.querySelectorAll('*')].filter(function(n){
+    return /^(thumbnail|content|enclosure)$/.test(n.localName) && n.getAttribute('url')
+      && !/^(audio|video)\//i.test(n.getAttribute('type') || '')
+      && (n.localName !== 'enclosure' || /^image\//i.test(n.getAttribute('type') || '') || /\.(jpg|jpeg|png|webp)(\?|$)/i.test(n.getAttribute('url')));
+  }).sort(function(a,b){ return +(b.getAttribute('width') || 0) - +(a.getAttribute('width') || 0); });
+  if (media.length) return safeURL(media[0].getAttribute('url'), base);
+  const t = document.createElement('template'); t.innerHTML = rich || '';
+  const img = t.content.querySelector('img');
+  return img ? safeURL(img.getAttribute('src') || img.getAttribute('data-src'), base) : '';
+}
+function bskyImage(post){
+  return dig(post,'embed','images',0,'fullsize') || dig(post,'embed','external','thumb')
+    || dig(post,'embed','media','images',0,'fullsize') || dig(post,'embed','media','external','thumb') || '';
+}
 
 /* Safari rejects several date shapes Chrome accepts. Try progressively
    looser forms before giving up and calling it "now". */
@@ -984,7 +908,8 @@ function saveStream(){
       .sort(function(a,b){ return b.last - a.last; }).slice(0,180)
       .map(function(c){
         return {t:c.rep.title, l:c.rep.link, s:c.rep.source, k:c.rep.cat,
-                f:c.first, a:c.last, r:[...c.sources], g:[...c.cats], u:!!c.undated};
+                f:c.first, a:c.last, r:[...c.sources], g:[...c.cats], u:!!c.undated,
+                summary:c.rep.summary, image:c.rep.image, imageAlt:c.rep.imageAlt};
       });
     localStorage.setItem(KEY + '.stream', JSON.stringify({t:Date.now(), y:window.scrollY||0, rows:rows}));
   }catch(e){}
@@ -995,7 +920,8 @@ function restoreStream(){
     if (!d || !d.rows || Date.now() - d.t > 6*HOUR) return;
     d.rows.forEach(function(r){
       state.clusters.set(++cid, {
-        id: cid, rep:{title:r.t, link:r.l, source:r.s, cat:r.k, time:r.f},
+        id: cid, rep:{title:r.t, link:r.l, source:r.s, cat:r.k, time:r.f,
+                      summary:r.summary, image:r.image, imageAlt:r.imageAlt},
         sig: sig(r.t), sources: new Set(r.r), first: r.f, last: r.a,
         cats: new Set(r.g), undated: r.u, seen: true, alerted: true
       });
@@ -1025,6 +951,10 @@ function overlap(a,b){
 let cid = 0;
 function add(o){
   if (!o.title) return;
+  o.link = safeURL(o.link);
+  if (!o.link) return;
+  o.summary = synopsis(o.summary, o.title);
+  o.image = safeURL(o.image, o.link);
   const s = sig(o.title);
   if (s.size < 2) return;                       // too thin to cluster safely
 
@@ -1036,13 +966,27 @@ function add(o){
   }
 
   if (best){
-    if (best.sources.has(o.source)) return;     // same outlet re-listing
+    // A refresh may add a photo or synopsis to an already-cached headline.
+    // Keep each image and synopsis on the representative article's link.
+    if (best.rep.link === o.link){
+      if (o.image){ best.rep.image = o.image; best.rep.imageAlt = o.imageAlt; }
+      if (o.summary) best.rep.summary = o.summary;
+    }
+    // A publisher's illustrated report is a better preview than the same
+    // headline's aggregator link. The cluster's original timestamp is kept.
+    const previewScore = item => (item.summary ? 2 : 0) + (item.image ? 2 : 0)
+      + (hostOf(item.link) !== 'news.google.com' ? 1 : 0);
+    if (previewScore(o) > previewScore(best.rep)) best.rep = o;
+    if (best.sources.has(o.source)){
+      best.cats.add(o.cat);
+      return;
+    }
     best.sources.add(o.source);
     best.last = Math.max(best.last, o.time);
     best.cats.add(o.cat);
     o.sig = s;
     if (!o.undated) best.undated = false;
-    if (o.time < best.first){ best.first = o.time; best.rep = o; }
+    if (o.time < best.first) best.first = o.time;
     best.sig = new Set([...best.sig, ...s].slice(0,20));
     best.bumped = Date.now();
   } else {
@@ -1076,106 +1020,6 @@ async function loadPrebuilt(){
   }catch(e){ /* not deployed yet — relays carry on as before */ }
 }
 
-/* Live channel IDs resolved by the GitHub Action. Same idea as the feeds:
-   the work happens where CORS doesn't exist, and the page just reads the
-   answer off its own domain. This is what removes the manual paste. */
-let LIVEMAP = null, LIVE_AT = 0;
-
-async function loadLiveMap(){
-  try{
-    const r = await timedFetch('./live.json?t=' + Date.now(), 9000);
-    if (!r.ok) return;
-    const j = await r.json();
-    if (!j || !j.channels) return;
-    LIVEMAP = j.channels; LIVE_AT = j.built || 0;
-
-    /* Fold it into what the page already knows, so everything downstream
-       works unchanged — handles resolve instantly, streams play instantly. */
-    Object.keys(LIVEMAP).forEach(function(key){
-      const rec = LIVEMAP[key];
-      if (!rec || !rec.chan) return;
-      if (key.charAt(0) === '@') state.chans[key] = rec.chan;
-      /* Only a confirmed live broadcast is worth pinning to, and only while
-         it is recent. A build from hours ago is full of video ids for streams
-         that have since restarted — those play nothing, which is exactly what
-         a stale schedule looks like from the outside. */
-      if (rec.video && rec.live && !rejected(rec.video) && Date.now() - LIVE_AT < STREAM_TTL){
-        state.liveIds = state.liveIds || {};
-        state.liveAt = state.liveAt || {};
-        state.liveIds[rec.chan] = rec.video;
-        state.liveAt[rec.chan] = LIVE_AT;
-      }
-    });
-    drawVidPicker(); drawAgentNote();
-  }catch(e){ /* not deployed — the relay path still works */ }
-}
-
-/* Says plainly whether the scheduled build is feeding this page, so the
-   answer to "is the agent working" is on screen rather than guessed at. */
-function drawAgentNote(){
-  const el = $('#agentnote');
-  if (!el) return;
-  if (!LIVEMAP){
-    el.textContent = 'No build data — channels are resolved one at a time through public proxies, which is why some fail.';
-    return;
-  }
-  const keys = Object.keys(LIVEMAP);
-  const live = keys.filter(function(k){ return LIVEMAP[k].live; }).length;
-  const unknown = keys.filter(function(k){ return LIVEMAP[k].checked === false; }).length;
-  const age = LIVE_AT ? Math.round((Date.now() - LIVE_AT) / 60000) : null;
-  const dead = age !== null && age > STATUS_TTL/60000;
-  const aging = age !== null && age > STREAM_TTL/60000;
-  el.textContent = keys.length + ' channels checked by the build'
-    + (age !== null ? ' ' + (age < 1 ? 'just now' : (age < 90 ? age + 'm ago' : Math.round(age/60) + 'h ago')) : '')
-    + ' \u00B7 ' + live + ' live'
-    + (unknown ? ' \u00B7 ' + unknown + ' unknown' : '')
-    + (dead ? ' \u2014 stale, run the workflow by hand.'
-            : aging ? ' \u2014 stream links may have rotated; channels still known good.'
-                    : ' right now.');
-  el.style.color = dead ? 'var(--flag)' : '';
-}
-
-/* What the build knows about the channel currently loaded. */
-function buildRec(v){
-  if (!LIVEMAP) return null;
-  const keys = Object.keys(LIVEMAP);
-  for (let i = 0; i < keys.length; i++){
-    if (keys[i] === v || LIVEMAP[keys[i]].chan === v) return LIVEMAP[keys[i]];
-  }
-  return null;
-}
-function buildFresh(){ return LIVE_AT && (Date.now() - LIVE_AT < 90*60*1000); }
-
-/* true = confirmed live, false = confirmed off-air, null = unknown.
-   Unknown covers: no build data, a stale build, a channel the build never
-   got to — and the important one, a check that failed outright (throttled,
-   consent-walled). A failed check is NOT "off air": the page falls back to
-   YouTube's own live_stream resolver and lets YouTube decide, instead of
-   telling you a live channel isn't broadcasting. Only a check that actually
-   ran and found nothing gets to say false. */
-/* Two different clocks, which I had wrongly merged into one:
-     - whether a channel is a 24/7 broadcaster barely changes, so this
-       judgement stays useful for hours;
-     - a live VIDEO id dies whenever the stream restarts, so it expires fast.
-   GitHub throttles free-tier cron to every few hours, so a single 90-minute
-   window threw away perfectly good status information. */
-const STATUS_TTL = 8*HOUR;          // is this channel broadcasting at all
-const STREAM_TTL = 90*60*1000;      // is this specific stream id still alive
-
-const rejected = id => !!(id && state.badIds && state.badIds[id]);
-
-function liveNow(entry){
-  if (!LIVEMAP) return null;                       // no build at all
-  if (LIVE_AT && Date.now() - LIVE_AT > STATUS_TTL) return null;
-  const rec = LIVEMAP[entry.v || entry.h];
-  if (!rec) return null;                           // no data for this channel
-  if (rec.checked === false) return null;          // the check itself failed
-  /* Whether we have a stream id is a separate question. A channel confirmed
-     live is safe for the channel embed even without one — substitution only
-     happens when the channel is off air. */
-  return !!rec.live;
-}
-
 function prebuiltAge(){
   return PREBUILT_AT ? Math.round((Date.now() - PREBUILT_AT) / 60000) : null;
 }
@@ -1191,7 +1035,7 @@ function parseRSS(xml, feed){
   let n = 0;
   const fromGN = (feed.url || '').indexOf('news.google.com') >= 0;
   nodes.slice(0,40).forEach(el => {
-    let title = strip(txt(el,'title'));
+    let title = feedTitle(txt(el,'title'), feed.url, txt(el,'source'));
     if (!title) return;
     /* Google News tacks the publisher onto every headline — "Headline - CNN".
        Left in, the same story from five outlets looks like five different
@@ -1200,13 +1044,19 @@ function parseRSS(xml, feed){
       const cut = /^(.{20,}?)\s+-\s+([^-]{2,40})$/.exec(title);
       if (cut) title = cut[1].trim();
     }
-    const link = (attr(el,'link','href') || txt(el,'link') || txt(el,'guid') || '').trim();
+    const links = [...el.querySelectorAll('link')];
+    const alternate = links.filter(function(n){ return !n.getAttribute('rel') || n.getAttribute('rel') === 'alternate'; })[0];
+    const link = (alternate && (alternate.getAttribute('href') || alternate.textContent) || txt(el,'guid') || '').trim();
+    const rawSummary = txt(el,'description, summary') || txt(el,'content\\:encoded, encoded, content');
+    const rich = txt(el,'content\\:encoded, encoded, content') || rawSummary;
+    const image = rssImage(el, rich, link || feed.url);
     const t = pdate(txt(el,'pubDate, published, updated, date'));
     /* A feed with no usable date used to get stamped "now", which made
        every one of its items look like breaking news and pinned that one
        outlet to the top of the stream. Now it's marked instead. */
     add({title, link, time: isNaN(t) ? Date.now() : t, undated: isNaN(t),
-         source:feed.name, cat:feed.cat});
+         source:fromGN ? (txt(el,'source') || feed.name) : feed.name, cat:feed.cat,
+         summary:fromGN ? '' : rawSummary, image:image});
     n++;
   });
   return n;
@@ -1217,9 +1067,10 @@ async function pullRSS(f){
   if (pre && pre.length){
     pre.forEach(function(it){
       const t = pdate(it.d);
-      add({title: strip(it.t), link: (it.l||'').trim(),
+      add({title: feedTitle(it.t, f.url, it.p), link: (it.l||'').trim(),
            time: isNaN(t) ? Date.now() : t, undated: isNaN(t),
-           source: f.name, cat: f.cat});
+           source: it.p || f.name, cat: f.cat,
+           summary: it.s || '', image: it.i || '', imageAlt: it.a || ''});
     });
     return pre.length;
   }
@@ -1236,7 +1087,7 @@ async function pullGDELT(feed, query){
   arts.forEach(a => {
     const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(a.seendate||'');
     const t = m ? Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]) : Date.now();
-    add({title:strip(a.title), link:a.url, time:t,
+    add({title:strip(a.title), link:a.url, time:t, image:a.socialimage, summary:a.description || '',
          source: query ? 'Search · GDELT' : 'GDELT '+(a.domain||''),
          cat: query ? 'search' : feed.cat});
   });
@@ -1264,7 +1115,7 @@ async function pullNWS(feed){
     const p=f.properties;
     add({title:`${p.event} — ${(p.areaDesc||'').split(';')[0]}`,
          link:'https://alerts.weather.gov/', time:pdate(p.sent)||Date.now(),
-         source:feed.name, cat:feed.cat});
+         source:feed.name, cat:feed.cat, summary:p.description || p.instruction});
   });
   return (j.features||[]).length;
 }
@@ -1285,7 +1136,7 @@ async function bskySearch(term, label){
   const posts = j.posts||[];
   posts.forEach(p=>{
     const body = strip(dig(p,'record','text')||''); if (!body) return;
-    add({title:clip(body,200),
+    add({title:clip(body,200), summary:body, image:bskyImage(p),
          link:'https://bsky.app/profile/'+dig(p,'author','handle')+'/post/'+(p.uri||'').split('/').pop(),
          time:pdate(dig(p,'record','createdAt')||p.indexedAt)||Date.now(),
          source:label+' · @'+(dig(p,'author','handle')||''), cat:'social'});
@@ -1298,7 +1149,7 @@ async function bskyAuthor(handle, cat){
   const feed = j.feed||[];
   feed.forEach(f=>{
     const p=f.post, body=strip(dig(p,'record','text')||''); if (!body) return;
-    add({title:clip(body,200),
+    add({title:clip(body,200), summary:body, image:bskyImage(p),
          link:'https://bsky.app/profile/'+dig(p,'author','handle')+'/post/'+(p.uri||'').split('/').pop(),
          time:pdate(dig(p,'record','createdAt')||p.indexedAt)||Date.now(),
          source:'@'+handle+' · Bluesky', cat: cat || 'social'});
@@ -1313,7 +1164,7 @@ async function mastoTag(tag){
   if (!Array.isArray(arr)) throw new Error('bad response');
   arr.forEach(s=>{
     const body = strip(s.content); if (!body) return;
-    add({title:clip(body,200), link:s.url, time:pdate(s.created_at)||Date.now(),
+    add({title:clip(body,200), summary:body, image:dig(s,'media_attachments',0,'preview_url'), link:s.url, time:pdate(s.created_at)||Date.now(),
          source:'#'+tag+' · Mastodon @'+(dig(s,'account','acct')||''), cat:'social'});
   });
   return arr.length;
@@ -1374,7 +1225,6 @@ async function loadAll(){
   tunePool();
   $('#status').textContent = 'Fetching…';
   await loadPrebuilt();
-  await loadLiveMap();
 
   const PRIORITY = ['local','state','wires','finance','hazard','search','politics','world','espanol','social','mine','reads'];
   const jobs = allFeeds()
@@ -1800,437 +1650,12 @@ function detectDevice(){
 }
 const DEVICE = detectDevice();
 const TV = PARAMS.tv === '0' ? false : (PARAMS.tv ? true : DEVICE === 'tv');
-const TV_DWELL = 18000;
-const perPage = () => state.video ? 9 : 6;
-let tvPage = 0;
 
 function tvLink(){
   const base = location.href.split('?')[0].split('#')[0];
   return base + '?tv=1&cats=' + encodeURIComponent([...state.on].join(','))
-              + '&words=' + encodeURIComponent($('#watch').value)
-              + (state.video ? '&video=' + encodeURIComponent(state.video) : '');
+              + '&words=' + encodeURIComponent($('#watch').value);
 }
-function drawTV(rows){
-  /* Hazards have their own tab. On the wall they crowd out real headlines,
-     so the board and the banner both leave them out. */
-  rows = rows.filter(function(c){ return !c.cats.has('hazard'); });
-  const clock = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-  $('#next').textContent = '';
-  const head = $('.streamhead');
-  if (!head.querySelector('.tvclock'))
-    head.insertAdjacentHTML('beforeend', '<span class="tvclock"></span>');
-  head.querySelector('.tvclock').textContent = clock;
-
-  const per = perPage();
-  const pages = Math.max(1, Math.ceil(Math.min(rows.length,60) / per));
-  if (tvPage >= pages) tvPage = 0;
-  const slice = rows.slice(tvPage*per, tvPage*per + per);
-
-  $('#list').innerHTML = slice.map(function(c){
-    const n = c.sources.size;
-    const others = [...c.sources].slice(0,2).join(', ');
-    return '<div class="item ' + (flagged(c)?'flagged':'') + '">' +
-      '<span class="age" style="--stripe:' + stripe(c.last) + '">' + age(c.first) + '</span>' +
-      '<span><span class="head">' + (hot(c)?'<span class="fresh">picking up</span>':'') + esc(c.rep.title) + '</span>' +
-      '<span class="sub">' + (n>1
-        ? '<span class="pickup">' + n + ' outlets</span> · ' + esc(others)
-        : '<span class="src">' + esc(c.rep.source) + '</span>') + '</span></span></div>';
-  }).join('') +
-  '<div class="pager">' + Array.from({length:pages}, function(_,i){
-    return i===tvPage ? '\u25CF' : '\u25CB'; }).join(' ') + '</div>';
-}
-
-/* ============ live video ============
-   Official broadcaster livestreams via YouTube's own embed player.
-   Two URL shapes are supported: a specific video, or a channel — the
-   channel form auto-follows whatever that outlet is streaming right
-   now, so it never goes stale.
-
-   Note: "free IPTV playlist" .m3u8 links circulating online are
-   unlicensed restreams. They die constantly and aren't worth wiring in. */
-/* Resolve any YouTube page to its permanent channel ID by reading the
-   page's own markup. That matters because broadcasters restart their
-   24/7 streams regularly — a video ID goes dead, a channel ID never
-   does. Once we have the channel, YouTube itself looks up the current
-   live stream on every single page load. */
-async function resolveChannel(url){
-  const html = await relayFetch(url);
-  let m = /"channelId":"(UC[\w-]{20,})"/.exec(html);
-  if (!m) m = /channel\/(UC[\w-]{20,})/.exec(html);
-  if (!m) m = /"externalId":"(UC[\w-]{20,})"/.exec(html);
-  return m ? 'c:' + m[1] : '';
-}
-
-function parseVideo(input){
-  if (!input) return '';
-  input = input.trim();
-  if (/^c:UC[\w-]+$/.test(input) || /^[\w-]{11}$/.test(input)) return input;
-  let m = /[?&]v=([\w-]{11})/.exec(input);            if (m) return m[1];
-  m = /youtu\.be\/([\w-]{11})/.exec(input);          if (m) return m[1];
-  m = /\/live\/([\w-]{11})/.exec(input);             if (m) return m[1];
-  m = /\/embed\/([\w-]{11})/.exec(input);            if (m) return m[1];
-  m = /\/channel\/(UC[\w-]+)/.exec(input);           if (m) return 'c:' + m[1];
-  return '';
-}
-/* live_stream?channel= only misbehaves when the channel is OFF AIR — then
-   YouTube substitutes somebody else's recommended stream. When the channel
-   really is live it serves the right thing. So it stays, but it is only ever
-   used for a channel the build has confirmed is broadcasting. */
-function videoSrc(v){
-  const common = 'autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1';
-  return v.indexOf('c:') === 0
-    ? 'https://www.youtube.com/embed/live_stream?channel=' + v.slice(2) + '&' + common
-    : 'https://www.youtube.com/embed/' + v + '?' + common;
-}
-
-/* YouTube's live_stream?channel= endpoint is old and frequently answers
-   with "Video unavailable" even when the channel is plainly streaming.
-   Reading the channel's own /live page for the current video ID and
-   embedding that directly is far more reliable — and since it re-runs on
-   every load, it still follows the stream through restarts. */
-/* Returns a video id ONLY when that video is genuinely broadcasting live.
-   The earlier version fell back to the channel's newest upload, which for a
-   news channel is nearly always a two-minute clip — that's why several
-   channels were playing videos instead of the live feed. A wrong stream is
-   worse than none, so this now returns nothing rather than guessing. */
-/* YouTube's oEmbed endpoint answers 200 for a playable video and an error
-   for one that is gone, private, or not embeddable. It is public, CORS-clean
-   and needs no relay — so we can check BEFORE mounting instead of leaving
-   "Video unavailable" on the wall. */
-async function playable(videoId){
-  try{
-    const u = 'https://www.youtube.com/oembed?url='
-            + encodeURIComponent('https://www.youtube.com/watch?v=' + videoId) + '&format=json';
-    const r = await timedFetch(u, 7000);
-    return r.ok;
-  }catch(e){ return true; }        // can't tell — don't block on it
-}
-
-async function currentLive(chanId){
-  try{
-    const html = await relayFetch('https://www.youtube.com/channel/' + chanId + '/live');
-    const isLive = /"isLiveNow"\s*:\s*true|hlsManifestUrl|"liveBroadcastDetails"/.test(html);
-    if (!isLive) return '';                 // channel isn't streaming right now
-    /* When a channel is off air YouTube hands back somebody else's
-       recommended stream. The video has to belong to this channel. */
-    /* Ownership must be proven, not assumed. If the markup doesn't say who
-       owns this video, it isn't good enough to swap a stream for. */
-    const owner = /"videoDetails":\{[\s\S]{0,3000}?"channelId":"(UC[\w-]{20,})"/.exec(html);
-    if (!owner || owner[1] !== chanId) return '';
-    let m = /"videoId":"([\w-]{11})"/.exec(html);
-    if (m) return rejected(m[1]) ? '' : m[1];
-    m = /watch\?v=([\w-]{11})/.exec(html);
-    if (m) return rejected(m[1]) ? '' : m[1];
-  }catch(e){}
-  return '';
-}
-function setVideo(v, name){
-  state.video = v;
-  if (name) state.videoName = name;
-  const box = $('#player');
-  if (!v){
-    state.mountedSrc = '';
-    box.className = 'on shut';
-    box.innerHTML = '<div class="pbar"><select id="pbarpick" class="pbarsel" '
-      + 'aria-label="Pick a channel">' + channelOptions('\u25B6 Live TV') + '</select></div>';
-    const sel = document.getElementById('pbarpick');
-    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
-    document.body.classList.remove('vid');
-    save(); draw(); return;
-  }
-  box.className = 'on';
-
-  const link = v.indexOf('c:') === 0
-    ? 'https://www.youtube.com/channel/' + v.slice(2) + '/live'
-    : 'https://www.youtube.com/watch?v=' + v;
-
-  const bar = function(){
-    return '<div class="pbar">'
-      + '<select id="pbarpick" class="pbarsel" aria-label="Switch channel">'
-      + channelOptions(state.videoName || 'Live') + '</select>'
-      + '<a href="' + link + '" target="_blank" rel="noopener">YouTube</a>'
-      + '<button id="pbad">Wrong stream</button>'
-      + '<button id="ppin">' + (state.pinned ? 'Unpin' : 'Pin') + '</button>'
-      + '<button id="pmin">Minimize</button>'
-      + '<button id="pstop">Stop</button></div>';
-  };
-  const mount = function(src){
-    /* Rebuilding the iframe tears down a playing stream. If the source hasn't
-       changed there is nothing to do — this is what was killing the video on
-       the wall display every half hour. */
-    if (state.mountedSrc === src && box.querySelector('iframe')) return;
-    state.mountedSrc = src;
-    box.innerHTML = bar() + '<div class="frame"><iframe src="' + src + '" '
-      + 'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen '
-      + 'title="Live news stream"></iframe></div>';
-    const st = document.getElementById('pstop');
-    if (st) st.onclick = function(e){ e.preventDefault(); state.playing = false; save(); setVideo(v); };
-    const pin = document.getElementById('ppin');
-    if (pin) pin.onclick = function(e){
-      e.preventDefault();
-      state.pinned = !state.pinned;
-      box.classList.toggle('unpinned', !state.pinned);
-      pin.textContent = state.pinned ? 'Unpin' : 'Pin';
-      save();
-    };
-    const sel = document.getElementById('pbarpick');
-    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
-    const bad = document.getElementById('pbad');
-    if (bad) bad.onclick = function(e){ e.preventDefault(); rejectStream(); };
-    const mn = document.getElementById('pmin');
-    if (mn) mn.onclick = function(e){ e.preventDefault(); setMini(true); };
-    box.classList.toggle('unpinned', !state.pinned);
-    /* A channel switch rebuilds the bar; keep the mini bar if it was on. */
-    setMini(box.classList.contains('mini'));
-  };
-  /* Minimize: collapse the video to a slim bar so the audio keeps playing
-     while you read the stories. Never rebuilds the iframe — that would
-     restart the stream. */
-  function setMini(on){
-    const bx = document.getElementById('player');
-    if (!bx) return;
-    bx.classList.toggle('mini', !!on);
-    const pb = bx.querySelector('.pbar');
-    let ex = document.getElementById('pexpand');
-    let nm = document.getElementById('pmininame');
-    if (on && pb){
-      if (!nm){
-        nm = document.createElement('span');
-        nm.id = 'pmininame';
-        pb.insertBefore(nm, pb.firstChild);
-      }
-      nm.textContent = state.videoName || 'Live';
-      if (!ex){
-        ex = document.createElement('button');
-        ex.id = 'pexpand';
-        ex.textContent = 'Expand';
-        ex.setAttribute('aria-label', 'Expand video');
-        ex.onclick = function(e){ e.preventDefault(); setMini(false); };
-        pb.insertBefore(ex, nm.nextSibling);
-      }
-    }
-    if (ex) ex.style.display = on ? '' : 'none';
-    if (nm) nm.style.display = on ? '' : 'none';
-  }
-  /* Nothing loads until you ask it to. An iframe that never resolves is
-     worse than a button that plainly says "not started yet". */
-  /* Automation can't always get through. Rather than a dead player, this
-     opens the channel on YouTube and takes the link back off the clipboard,
-     which then gets saved for good. */
-  const capture = function(msg){
-    /* The panel is hidden on the wall board — showing it there would render
-       a black rectangle with no explanation and nothing to tap. Move to a
-       channel that is actually broadcasting instead. */
-    if (TV){
-      state.mountedSrc = '';
-      const label = $('#tvchan');
-      if (label) label.textContent = (state.videoName || '') + ' \u2014 off air';
-      setTimeout(function(){ cycleChannel(1); }, 400);
-      return;
-    }
-    state.mountedSrc = '';
-    box.innerHTML = '<div class="pbar">'
-      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
-      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
-      + '<button id="pstop">Hide</button></div>'
-      + '<div class="capture">'
-      + '<p>' + esc(msg) + '</p>'
-      + '<a class="cgo" href="' + link + '" target="_blank" rel="noopener">Open '
-      + esc(state.videoName || 'the channel') + ' on YouTube \u2197</a>'
-      + '<p class="chint">Tap the live stream there, copy the address, then come back:</p>'
-      + '<button class="cgo alt" id="cpaste">Paste the link &amp; save</button>'
-      + '<input id="cmanual" placeholder="\u2026or paste it here" aria-label="Paste stream link">'
-      + '</div>';
-
-    const sel = document.getElementById('pbarpick');
-    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
-    const hide = document.getElementById('pstop');
-    if (hide) hide.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); };
-
-    const take = function(text){
-      const id = parseVideo(text || '');
-      if (!id || id.indexOf('c:') === 0){
-        $('#vidnote').textContent = "That wasn't a video link — open the stream itself, then copy.";
-        return;
-      }
-      state.liveIds = state.liveIds || {};
-      state.liveIds[v] = id;
-      state.liveAt = state.liveAt || {};
-      state.liveAt[v] = Date.now();
-      state.manualIds = state.manualIds || {};
-      state.manualIds[v] = {id: id, at: Date.now()};   // yours, so it's kept
-      state.playing = true;
-      save();
-      $('#vidnote').textContent = 'Saved. That stream will play from now on.';
-      setVideo(v);
-    };
-
-    const pb = document.getElementById('cpaste');
-    if (pb) pb.onclick = async function(){
-      try{
-        const t = await navigator.clipboard.readText();
-        take(t);
-      }catch(e){
-        $('#vidnote').textContent = 'Clipboard blocked — paste into the box instead.';
-        const box2 = document.getElementById('cmanual');
-        if (box2) box2.focus();
-      }
-    };
-    const man = document.getElementById('cmanual');
-    if (man) man.addEventListener('change', function(){ take(man.value); });
-  };
-
-  const poster = function(){
-    state.mountedSrc = '';
-    box.innerHTML = '<div class="pbar">'
-      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
-      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
-      + '<button id="pstop">Hide</button></div>'
-      + '<div class="poster"><button id="pplay">\u25B6  Play '
-      + esc(state.videoName || 'live news') + '</button></div>';
-    const b = document.getElementById('pplay');
-    if (b) b.onclick = function(){ state.playing = true; save(); setVideo(v); };
-    const sel = document.getElementById('pbarpick');
-    if (sel) sel.onchange = function(){ pickChannel(sel.value); };
-    const hide = document.getElementById('pstop');
-    if (hide) hide.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); drawVidPicker(); };
-  };
-
-  if (!state.playing){
-    poster();
-    box.classList.toggle('unpinned', !state.pinned);
-    if (TV) document.body.classList.add('vid');
-    save(); draw(); return;
-  }
-
-  /* A failed lookup must never take down a player that is already running.
-     The live_stream embed needs no relay whatsoever — the lookup is only
-     ever an upgrade on top of it, so a failure just leaves things as they
-     were and offers a manual fix. */
-  const softFail = function(){
-    $('#vidnote').textContent = '';
-    const bar2 = box.querySelector('.pbar');
-    if (bar2 && !document.getElementById('pfix')){
-      const b = document.createElement('button');
-      b.id = 'pfix';
-      b.textContent = 'Fix stream';
-      b.onclick = function(e){ e.preventDefault(); capture('Set this stream by hand:'); };
-      bar2.appendChild(b);
-    }
-  };
-
-  /* Reuse the last stream ID we resolved for this channel, so returning to
-     the page doesn't depend on the relays answering all over again. */
-  /* When the build says a channel is off air, refuse to mount anything.
-     YouTube's live_stream resolver happily serves that channel's LAST
-     broadcast instead of nothing, which is how a four-hour replay ends up
-     on screen pretending to be live. */
-  const rec = buildRec(v);
-  /* Unknown (checked:false) must NOT trip this gate — only a confirmed
-     off-air build record refuses the embed. An unreadable check falls
-     through to the tri-state branch below, which mounts YouTube's own
-     live_stream resolver and lets YouTube decide. */
-  if (rec && buildFresh() && rec.checked !== false && !rec.live && state.forcePlay !== v){
-    box.innerHTML = '<div class="pbar">'
-      + '<select id="pbarpick" class="pbarsel" aria-label="Pick a channel">'
-      + channelOptions(state.videoName || 'Pick a channel') + '</select>'
-      + '<button id="pstop">Hide</button></div>'
-      + '<div class="capture"><p>' + esc(rec.name || state.videoName || 'That channel')
-      + " isn't broadcasting right now.</p>"
-      + '<a class="cgo" href="' + link + '" target="_blank" rel="noopener">Open on YouTube \u2197</a>'
-      + '<p class="chint">Or pick a channel showing \u25CF above \u2014 those are live.</p>'
-      + '<button class="cgo alt" id="playanyway">Play their last broadcast</button></div>';
-    const sel2 = document.getElementById('pbarpick');
-    if (sel2) sel2.onchange = function(){ pickChannel(sel2.value); };
-    const hide2 = document.getElementById('pstop');
-    if (hide2) hide2.onclick = function(e){ e.preventDefault(); markChannel(null); setVideo(''); };
-    const any = document.getElementById('playanyway');
-    if (any) any.onclick = function(e){
-      e.preventDefault();
-      state.forcePlay = v;                 // you asked for it explicitly
-      setVideo(v, state.videoName);
-    };
-    box.classList.toggle('unpinned', !state.pinned);
-    if (TV) document.body.classList.add('vid');
-    save(); draw();
-    return;
-  }
-  if (state.forcePlay === v) state.forcePlay = '';
-
-  let known = state.liveIds && state.liveIds[v];
-  if (v.indexOf('c:') !== 0) known = v;        // a bare video id is its own answer
-  const savedAt = (state.liveAt && state.liveAt[v]) || 0;
-  /* Any saved id expires. Build ids get 90 minutes (they refresh often),
-     ids you pasted yourself get 12 hours. An expired id is dropped so the
-     lookup runs again rather than playing a dead stream. */
-  const fromBuild = LIVEMAP && Object.keys(LIVEMAP).some(function(k){
-    return LIVEMAP[k].chan === v && LIVEMAP[k].video === known;
-  });
-  const maxAge = fromBuild ? STREAM_TTL : 12*HOUR;
-  if (known && savedAt && Date.now() - savedAt > maxAge) known = null;
-
-  const entry = CATALOG.concat(state.myChannels || []).filter(function(x){
-    return x.v === v || state.chans[x.h] === v;
-  })[0];
-  const airing = entry ? liveNow(entry) : null;   // true / false / unknown
-
-  if (known){
-    mount(videoSrc(known));                       // a verified stream, best case
-  } else if (airing === false){
-    /* Confirmed off air. This is the only case where the channel embed
-       would substitute someone else's broadcast, so don't use it. */
-    capture((entry.n || 'That channel') + " isn't broadcasting right now.");
-  } else if (state.noStream[v] && Date.now() - state.noStream[v] < 15*60*1000){
-    /* Checked within the last quarter hour and found nothing live. */
-    capture((entry && entry.n ? entry.n : 'That channel') + ' has no live stream right now.');
-  } else {
-    /* Live, or not yet known. The channel embed is safe here and is the
-       only thing that plays without a working proxy. */
-    mount(videoSrc(v));
-  }
-
-  /* Don't go looking for an upgrade when the build already handed us a
-     fresh, verified stream — that lookup is exactly what was replacing a
-     correct stream with somebody else's video a moment after it loaded. */
-  if (v.indexOf('c:') === 0 && !(known && fromBuild)){
-    currentLive(v.slice(2)).then(function(id){
-      if (id && state.video === v){
-        state.liveIds = state.liveIds || {};
-        if (state.liveIds[v] !== id){
-          state.liveIds[v] = id;
-          state.liveAt = state.liveAt || {};
-          state.liveAt[v] = Date.now();
-          save(); mount(videoSrc(id));
-        }
-      }
-      else if (state.video === v && !known){
-        const entry = CATALOG.filter(function(x){
-          return x.k === 'yt' && (x.v === v || state.chans[x.h] === v);
-        })[0];
-        if (entry && liveNow(entry) === false)
-          $('#vidnote').textContent = (entry.n || 'That channel') + " isn't broadcasting live right now.";
-        softFail();
-      }
-    }).catch(function(){
-      if (state.video === v && !known) softFail();
-    });
-  }
-  if (TV) document.body.classList.add('vid');
-  save(); draw();
-}
-function drawTicker(rows){
-  /* Quakes and weather alerts have their own tab and were dominating the
-     banner — a magnitude 4 in Chile is not what the shop wants scrolling. */
-  const bits = rows.filter(function(c){ return !c.cats.has('hazard') && !c.wx; })
-    .slice(0,14).map(function(c){
-    const n = c.sources.size;
-    return '<span>' + (flagged(c) || hot(c) ? '<b>' + esc(c.rep.title) + '</b>' : esc(c.rep.title))
-      + (n>1 ? '  \u00B7 ' + n + ' outlets' : '') + '</span>';
-  }).join('');
-  $('#tickin').innerHTML = bits + bits;   // doubled so the loop reads seamlessly
-}
-
-
 /* ============ source directory ============
    Everything here is free and needs no account. Where an outlet's own
    RSS path is unreliable or unknown, it goes through Google News'
@@ -2283,30 +1708,7 @@ const CATALOG = [
   {n:'Univision',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('univision.com','es-419','US')},
   {n:'Telemundo',           r:'EE.UU.',    l:'es', k:'rss', c:'espanol', u:GSITE('telemundo.com','es-419','US')},
 
-  /* --- live video. Verified IDs play instantly; handles resolve once. --- */
-  {n:'Sky News',            r:'UK',        l:'en', k:'yt', v:'c:UCoMdktPbSTixAyNGwb-UYkQ'},
-  {n:'Al Jazeera English',  r:'Qatar',     l:'en', k:'yt', v:'c:UCNye-wNBqNL5ZzHSJj3l8Bg'},
-  {n:'Sky News Español',    r:'UK',        l:'es', k:'yt', v:'c:UCzG5BnqHO8oNlrPDW9CYJog'},
-  {n:'DW News',             r:'Germany',   l:'en', k:'yt', v:'c:UCknLrEdhRCp1aegoMqRaCZg'},
-  {n:'France 24 English',   r:'France',    l:'en', k:'yt', v:'c:UCQfwfsi5VrQ8yKZ-UWmAEFg'},
-  {n:'ABC News Live',       r:'USA',       l:'en', k:'yt', h:'@ABCNews'},
-  {n:'NBC News NOW',        r:'USA',       l:'en', k:'yt', h:'@NBCNews'},
-  {n:'CBS News',            r:'USA',       l:'en', k:'yt', h:'@CBSNews'},
-  {n:'LiveNOW from FOX',    r:'USA',       l:'en', k:'yt', h:'@LiveNOWFOX'},
-  {n:'Bloomberg',           r:'USA',       l:'en', k:'yt', h:'@markets'},
-  {n:'Euronews English',    r:'Europe',    l:'en', k:'yt', h:'@euronews'},
-  {n:'DW Español',          r:'Germany',   l:'es', k:'yt', h:'@dwespanol'},
-  {n:'France 24 Español',   r:'France',    l:'es', k:'yt', h:'@FRANCE24Espanol'},
-  {n:'RTVE Noticias',       r:'España',    l:'es', k:'yt', h:'@rtvenoticias'},
-  {n:'Noticias Caracol',    r:'Colombia',  l:'es', k:'yt', h:'@NoticiasCaracol'},
-  {n:'El Tiempo',           r:'Colombia',  l:'es', k:'yt', h:'@eltiempo'},
-  {n:'Milenio',             r:'México',    l:'es', k:'yt', h:'@milenio'},
 
-  /* --- markets. These stream during market hours, not around the clock,
-         so outside those hours the channel simply has nothing live. --- */
-  {n:'TraderTV Live',       r:'Markets',   l:'en', k:'yt', h:'@TraderTVLive'},
-  {n:'NinjaTrader',         r:'Markets',   l:'en', k:'yt', h:'@NinjaTrader'},
-  {n:'Smooth Trader TV',    r:'Markets',   l:'en', k:'yt', h:'@SmoothTraderTV'}
 ];
 let catFilter = 'all';
 
@@ -2315,8 +1717,6 @@ function catalogRows(){
   return CATALOG.filter(function(e){
     if (catFilter === 'en' && e.l !== 'en') return false;
     if (catFilter === 'es' && e.l !== 'es') return false;
-    if (catFilter === 'yt' && e.k !== 'yt') return false;
-    if (catFilter === 'mk' && e.r !== 'Markets') return false;
     if (!q) return true;
     return (e.n + ' ' + e.r + ' ' + (e.l === 'es' ? 'espanol spanish' : 'english')).toLowerCase().indexOf(q) >= 0;
   });
@@ -2327,25 +1727,17 @@ function addedAlready(e){
 function drawCatalog(){
   const rows = catalogRows();
   $('#catalog').innerHTML = rows.length ? rows.map(function(e, i){
-    const on = addedAlready(e) || (e.k === 'yt' && (e.v === state.video || state.chans[e.h] === state.video));
+    const on = addedAlready(e);
     return '<div class="entry"><span class="label">' + esc(e.n)
-      + ' <span style="color:#5D7186">' + esc(e.r) + (e.k==='yt' ? ' · live' : '') + '</span></span>'
+      + ' <span style="color:#5D7186">' + esc(e.r) + '' + '</span></span>'
       + '<button class="kill" data-cat="' + rows.indexOf(e) + '" style="color:'
-      + (on ? '#6FB08A' : '#E8A33D') + ';font-size:13px">' + (on ? 'on' : (e.k==='yt' ? 'play' : 'add')) + '</button></div>';
+      + (on ? '#6FB08A' : '#E8A33D') + ';font-size:13px">' + (on ? 'on' : 'add') + '</button></div>';
   }).join('') : '<p class="hint" style="margin:0">Nothing matches that.</p>';
 
   $('#catalog').querySelectorAll('[data-cat]').forEach(function(b){
     b.onclick = function(){
       const e = catalogRows()[+b.dataset.cat];
       if (!e) return;
-      if (e.k === 'yt'){
-        markChannel(null);
-        if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
-        else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
-        else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
-        drawCatalog();
-        return;
-      }
       if (addedAlready(e)){
         state.custom = state.custom.filter(function(f){ return f.url !== e.u; });
       } else {
@@ -2362,113 +1754,6 @@ function hashOf(str){
   let h = 0;
   for (let i = 0; i < str.length; i++){ h = ((h<<5) - h + str.charCodeAt(i)) | 0; }
   return h;
-}
-
-/* "That's not the live stream." Blacklists whatever is playing so nothing
-   offers it again, looks for a replacement straight away, and — if a token
-   is set — asks the agent for a fresh build so the fix reaches every device. */
-async function rejectStream(){
-  const v = state.video;
-  if (!v) return;
-  const bad = state.mountedSrc ? (/embed\/([\w-]{11})/.exec(state.mountedSrc) || [])[1] : null;
-  const note = $('#vidnote');
-
-  if (bad){
-    state.badIds[bad] = Date.now();
-    if (state.liveIds && state.liveIds[v] === bad) delete state.liveIds[v];
-    if (state.manualIds && state.manualIds[v]) delete state.manualIds[v];
-    save();
-  }
-  if (note) note.textContent = 'Marked wrong. Looking for the real stream…';
-  state.mountedSrc = '';
-
-  /* Ask the agent to rebuild, so other devices get the correction too. */
-  if (state.ghToken){
-    timedFetch('https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches',
-      15000, { method:'POST', headers:{
-        'Accept':'application/vnd.github+json', 'Authorization':'Bearer ' + state.ghToken,
-        'X-GitHub-Api-Version':'2022-11-28', 'Content-Type':'application/json'
-      }, body: JSON.stringify({ ref:'main' }) }).catch(function(){});
-  }
-
-  if (v.indexOf('c:') === 0){
-    try{
-      const id = await currentLive(v.slice(2));
-      if (id && !rejected(id)){
-        state.liveIds[v] = id;
-        state.liveAt[v] = Date.now();
-        save();
-        delete state.noStream[v];
-        if (note) note.textContent = 'Found a different stream.';
-        setVideo(v);
-        return;
-      }
-    }catch(e){}
-  }
-  /* Nothing live for this channel. Falling back to the channel embed here
-     just parks on YouTube's "video unavailable" screen, which tells you
-     nothing — the panel says it in plain words instead. */
-  state.noStream[v] = Date.now();
-  if (note) note.textContent = '';
-  if (TV) cycleChannel(1); else setVideo(v);
-}
-
-/* Channels worth trying on the board. Cycling through these avoids landing
-   on a dead one, which in display mode shows as a black box because the
-   play button and off-air panel are both hidden there. */
-function liveChannels(){
-  /* A confirmed-live channel with a verified stream id is the only thing
-     guaranteed to play. */
-  const withId = allChannels().filter(function(e){
-    const key = e.v || (e.h && state.chans[e.h]);
-    return liveNow(e) === true && key && state.liveIds && state.liveIds[key];
-  });
-  if (withId.length) return withId;
-  /* Then anything not confirmed dark: confirmed-live channels, plus channels
-     whose check failed. A failed check is unknown, not off-air — the channel
-     embed lets YouTube itself decide, which beats a board cycling through
-     "off air" labels for channels that are plainly broadcasting. */
-  const maybe = allChannels().filter(function(e){ return liveNow(e) !== false; });
-  return maybe.length ? maybe : allChannels();
-}
-function currentIndex(list){
-  for (let i = 0; i < list.length; i++){
-    const e = list[i];
-    if ((e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video)) return i;
-  }
-  return -1;
-}
-function cycleChannel(dir){
-  const list = liveChannels();
-  if (!list.length) return;
-  const at = currentIndex(list);
-  const e = list[((at + dir) % list.length + list.length) % list.length];
-  state.playing = true;
-  if (e.v) setVideo(e.v, e.n);
-  else if (state.chans[e.h]) setVideo(state.chans[e.h], e.n);
-  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
-  const label = $('#tvchan');
-  if (label) label.textContent = e.n || '';
-}
-
-/* Step to the next live channel in the directory. Ones already resolved
-   switch instantly; the rest get looked up on the way. */
-function nextChannel(){
-  if (state.resolving) return;                 // don't stack lookups
-  const live = CATALOG.filter(function(e){ return e.k === 'yt'; });
-  if (!live.length) return;
-  let at = -1;
-  for (let i = 0; i < live.length; i++){
-    const e = live[i];
-    if ((e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video)){ at = i; break; }
-  }
-  const e = live[(at + 1) % live.length];
-  state.playing = true;
-  markChannel(null);
-  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
-  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
-  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
-  drawCatalog();
 }
 
 /* Wires carry the whole planet. A story about the US military in Gaza is
@@ -2562,11 +1847,10 @@ function bskyLive(){
 }
 
 /* ============ sections ============
-   Nine tabs over one stream. "All" is a digest — the four biggest stories
-   from each section — and each tab opens the full list for that section.
+   Section tabs filter the same continuous feed.
    Badges count what has arrived since you last opened that tab. */
 const TABS = [
-  {id:'all',      label:'All',      cats:null, match:null},
+  {id:'all',      label:'For you',      cats:null, match:null},
   {id:'t-local',  label:'Local',    cats:['local'],
    match: c => hasCat(c,['local'])},
   {id:'t-state',  label:'State',    cats:['state'],
@@ -2588,7 +1872,6 @@ const TABS = [
   {id:'t-mine',   label:'Yours',    cats:['mine','search'],
    match: c => hasCat(c,['mine','search'])}
 ];
-const DIGEST_PER_SECTION = 4;
 
 function clustersFor(tab){
   const cats = tab && tab.cats;
@@ -2639,74 +1922,6 @@ function openTab(id){
   window.scrollTo(0, 0);
 }
 
-/* Channels you paste in are kept alongside the built-in ones, so a feed
-   you found once is in the dropdown from then on. */
-function rememberChannel(key, name){
-  state.myChannels = state.myChannels || [];
-  if (state.myChannels.some(function(c){ return c.v === key; })) return;
-  state.myChannels.push({n: (name || 'Saved channel').slice(0,40), v: key, r: 'Yours', k: 'yt', l: 'en'});
-  save();
-  drawVidPicker(); drawMyChannels();
-}
-function allChannels(){
-  return CATALOG.filter(function(e){ return e.k === 'yt'; }).concat(state.myChannels || []);
-}
-function drawMyChannels(){
-  const box = $('#mychans');
-  if (!box) return;
-  const list = state.myChannels || [];
-  box.innerHTML = list.length
-    ? list.map(function(c){
-        return '<div class="entry"><span class="label">' + esc(c.n) + '</span>'
-          + '<button class="kill" data-ch="' + esc(c.v) + '" aria-label="Remove">\u00D7</button></div>';
-      }).join('')
-    : '<p class="hint" style="margin:0">Paste a YouTube channel above and it is saved here.</p>';
-  box.querySelectorAll('[data-ch]').forEach(function(b){
-    b.onclick = function(){
-      state.myChannels = (state.myChannels || []).filter(function(c){ return c.v !== b.dataset.ch; });
-      save(); drawMyChannels(); drawVidPicker();
-    };
-  });
-}
-
-function channelOptions(placeholder){
-  const groups = {};
-  allChannels().forEach(function(e){
-    (groups[e.r] = groups[e.r] || []).push(e);
-  });
-  let html = '<option value="">' + esc(placeholder || '\u2014 pick a channel \u2014') + '</option>';
-  Object.keys(groups).forEach(function(g){
-    html += '<optgroup label="' + esc(g) + '">';
-    groups[g].forEach(function(e){
-      const key = e.v || e.h;
-      const on = (e.v && e.v === state.video) || (e.h && state.chans[e.h] === state.video);
-      const lv = liveNow(e);
-      const mark = lv === true ? '\u25CF ' : (lv === false ? '\u25CB ' : '');
-      html += '<option value="' + esc(key) + '"' + (on ? ' selected' : '') + '>'
-           + mark + esc(e.n) + '</option>';
-    });
-    html += '</optgroup>';
-  });
-  return html;
-}
-
-/* Every channel picker — rail, player bar, poster — runs through here. */
-function pickChannel(key){
-  if (!key) return;
-  const e = allChannels().filter(function(x){ return x.v === key || x.h === key; })[0];
-  if (!e) return;
-  state.playing = true;
-  markChannel(null);
-  if (e.v){ $('#vidnote').textContent = ''; setVideo(e.v, e.n); }
-  else if (state.chans[e.h]){ $('#vidnote').textContent = ''; setVideo(state.chans[e.h], e.n); }
-  else acceptVideo('https://www.youtube.com/' + e.h, e.n, e.h);
-}
-
-function drawVidPicker(){
-  const sel = $('#vidpick');
-  if (sel) sel.innerHTML = channelOptions();
-}
-
 function drawBskyPicker(){
   const sel = $('#bskypick');
   if (!sel) return;
@@ -2726,6 +1941,56 @@ function drawBskyPicker(){
   });
   sel.innerHTML = html;
 }
+
+/* ============ automatic feed scrolling ============ */
+let scrollUntil = 0, scrollLast = 0, scrollCarry = 0, scrollAtEnd = 0;
+function updateScrollControls(){
+  ['#scrolltoggle','#tvpause'].forEach(function(sel){
+    const b = $(sel);
+    b.textContent = state.autoScroll ? 'Pause scroll' : 'Start scroll';
+    b.setAttribute('aria-pressed', String(state.autoScroll));
+  });
+}
+function toggleScroll(){
+  state.autoScroll = !state.autoScroll;
+  scrollUntil = 0;
+  updateScrollControls(); save();
+}
+function pauseForReading(){ scrollUntil = Date.now() + 12000; }
+$('#scrolltoggle').onclick = toggleScroll;
+$('#scrollspeed').onchange = function(){ state.scrollSpeed = +this.value; save(); };
+['wheel','touchstart','pointerdown','keydown'].forEach(function(type){
+  window.addEventListener(type, pauseForReading, {passive:true});
+});
+$('#list').addEventListener('error', function(e){
+  const img = e.target;
+  if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+  img.dataset.fallback = 'true';
+  img.src = './story-placeholder.svg';
+  img.alt = 'Story photo unavailable';
+  const media = img.parentNode;
+  media.classList.add('no-photo');
+  if (!media.querySelector('.photo-note')) media.insertAdjacentHTML('beforeend','<span class="photo-note">Story photo unavailable</span>');
+}, true);
+function scrollFrame(now){
+  const dt = Math.min((now - (scrollLast || now))/1000, .1);
+  scrollLast = now;
+  const focus = document.activeElement;
+  const reading = $('.rail.open') || (focus && /^(INPUT|TEXTAREA|SELECT)$/.test(focus.tagName));
+  if (state.autoScroll && !document.hidden && Date.now() >= scrollUntil && !reading && !$('#list').matches(':hover') && !window.getSelection().toString()){
+    const bottom = document.documentElement.scrollHeight - window.innerHeight;
+    if (bottom > 100 && window.scrollY >= bottom - 2){
+      if (!scrollAtEnd) scrollAtEnd = now;
+      if (now - scrollAtEnd > 5000){ window.scrollTo(0,0); scrollAtEnd = 0; }
+    }else{
+      scrollAtEnd = 0;
+      scrollCarry += state.scrollSpeed * dt;
+      if (scrollCarry >= 1){ const step = Math.floor(scrollCarry); window.scrollBy(0,step); scrollCarry -= step; }
+    }
+  }
+  window.requestAnimationFrame(scrollFrame);
+}
+window.requestAnimationFrame(scrollFrame);
 
 /* ============ rendering ============ */
 /* 0 = your town, 1 = your state, 2 = national, 3 = international. */
@@ -2775,7 +2040,7 @@ function score(c){
 }
 function visible(){
   const f = $('#filter').value.trim().toLowerCase();
-  let out = [...state.clusters.values()].filter(c => [...c.cats].some(x => state.on.has(x)));
+  let out = [...state.clusters.values()].filter(c => !c.cats.has('hazard') && [...c.cats].some(x => state.on.has(x)));
   if (f) out = out.filter(c => (c.rep.title+' '+[...c.sources].join(' ')).toLowerCase().includes(f));
   const ranked = applyQuota(diversify(out.sort((a,b) => score(b) - score(a)).slice(0,250)));
 
@@ -2819,93 +2084,58 @@ function highlight(t, terms){
 }
 
 function rowHTML(c, terms){
-  const n = c.sources.size;
-  const isFlag = flagged(c);
-  const readOnly = c.cats.has('reads') && n < 2;
-  const others = [...c.sources].slice(0,3).join(', ');
-  return `<a class="item ${isFlag?'flagged':''} ${readOnly?'reads':''} ${c.wx?'wx':''}" href="${esc(c.rep.link)}" target="_blank" rel="noopener">
-      <span class="age" style="--stripe:${c.wx?'#3A4C60':stripe(c.last)}">${c.wx?'wx':age(c.first)}</span>
-      <span>
-        <span class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</span>
-        <span class="sub">${ n>1
-            ? `<span class="pickup">${n} outlets</span> · ${esc(others)}${n>3?' +'+(n-3):''}`
-            : `<span class="src">${esc(c.rep.source)}</span>${hostOf(c.rep.link)?' · '+esc(hostOf(c.rep.link)):''}` }</span>
-      </span></a>`;
+  const n = c.sources.size, source = c.rep.source || 'Wire Desk';
+  const section = CATS.filter(function(t){ return t.id === c.rep.cat; })[0];
+  const summary = synopsis(c.rep.summary, c.rep.title);
+  const image = safeURL(c.rep.image, c.rep.link);
+  const otherSources = [...c.sources].slice(0,3).join(', ');
+  return `<article class="item ${flagged(c)?'flagged':''} ${c.wx?'wx':''}" data-story="${esc(String(c.id))}">
+    <span class="source-avatar" aria-hidden="true" style="--avatar-hue:${Math.abs(hashOf(source))%360}">${esc(source.replace(/^@/,'').slice(0,2).toUpperCase())}</span>
+    <div class="story-body">
+      <div class="story-meta"><span class="source-name">${esc(source)}</span><span class="story-section">${esc(section ? section.label : 'News')}</span><span aria-hidden="true">·</span><time datetime="${new Date(c.first).toISOString()}">${c.undated?'Time unavailable':age(c.first)}</time></div>
+      <a class="story-link" href="${esc(safeURL(c.rep.link))}" target="_blank" rel="noopener noreferrer">
+        <h2 class="head">${hot(c)?'<span class="fresh">picking up</span>':''}${highlight(c.rep.title, terms)}</h2>
+        <p class="synopsis ${summary?'':'summary-missing'}">${summary ? esc(summary) : 'Read the full report from ' + esc(source) + '. Summary unavailable.'}</p>
+        ${c.wx ? '' : `<div class="story-media ${image?'':'no-photo'}"><img src="${esc(image || './story-placeholder.svg')}" alt="${image ? esc(c.rep.imageAlt || c.rep.title) : 'No story photo provided'}" width="800" height="450" loading="lazy" decoding="async" referrerpolicy="no-referrer">${image?'':'<span class="photo-note">Story photo unavailable</span>'}</div>`}
+        <span class="story-footer"><span>${n>1 ? '<span class="pickup">' + n + ' outlets</span> · ' + esc(otherSources) : esc(hostOf(c.rep.link))}</span><span class="read-story">Read story <span aria-hidden="true">↗</span></span></span>
+      </a>
+    </div></article>`;
 }
 
-/* The digest: every section's top few, so one screen tells you what the
-   day looks like without committing to any one feed. */
-/* A story tagged wires + politics used to headline both sections, so the
-   digest showed the same thing three times. Each story now belongs to the
-   first section that claims it, in tab order. */
-function primaryTab(c){
-  for (let i = 1; i < TABS.length; i++){
-    if (TABS[i].match && TABS[i].match(c)) return TABS[i].id;
+// Preserve the story being read when background refreshes reorder the feed.
+function renderFeed(rows, terms){
+  const list = $('#list');
+  const html = rows.map(function(c){ return rowHTML(c, terms); }).join('');
+  if (list._html === html) return;
+  const anchor = window.scrollY > 160 ? [...list.querySelectorAll('[data-story]')].filter(function(el){ return el.getBoundingClientRect().bottom > 160; })[0] : null;
+  const id = anchor && anchor.dataset.story;
+  const top = anchor && anchor.getBoundingClientRect().top;
+  list.innerHTML = html;
+  list._html = html;
+  if (id){
+    const next = list.querySelector('[data-story="' + id + '"]');
+    if (next) window.scrollBy(0, next.getBoundingClientRect().top - top);
   }
-  return null;
-}
-
-function drawDigest(terms){
-  let html = '', total = 0, shown = 0;
-  TABS.forEach(function(t){
-    if (t.id === 'all') return;
-    const rows = clustersFor(t).filter(function(c){
-      return c.wx || primaryTab(c) === t.id;
-    });
-    if (!rows.length) return;
-    const n = newCount(t);
-    total += rows.length;
-    shown += Math.min(rows.length, DIGEST_PER_SECTION);
-    html += '<div class="sec"><h3>' + t.label + '</h3>'
-         + '<span class="n">' + rows.length + (n ? ' · ' + n + ' new' : '') + '</span>'
-         + '<button class="more" data-open="' + t.id + '">See all \u203A</button></div>'
-         + rows.slice(0, DIGEST_PER_SECTION).map(function(c){ return rowHTML(c, terms); }).join('');
-  });
-  $('#list').innerHTML = html;
-  $('#list').querySelectorAll('[data-open]').forEach(function(b){
-    b.onclick = function(e){ e.preventDefault(); openTab(b.dataset.open); };
-  });
-  return shown ? {shown: shown, total: total} : 0;
 }
 
 function draw(){
   const terms = [$('#filter').value.trim(), ...watchwords()].filter(Boolean);
-  const tab = TABS.filter(function(t){ return t.id === state.tab; })[0] || TABS[0];
-
-  if (TV){
-    const rows = visible();
-    if (rows.length){
-      if (state.video) drawTicker(rows);
-      drawTV(rows);
-      return;
-    }
-  }
-
+  const tab = TV ? TABS[0] : TABS.filter(function(t){ return t.id === state.tab; })[0] || TABS[0];
+  let rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab)).slice(0,250);
+  if (TV) rows = rows.filter(function(c){ return !c.cats.has('hazard'); });
   drawTabs();
-
-  if (tab.id === 'all' && !$('#filter').value.trim()){
-    const d = drawDigest(terms);
-    if (d){
-      $('#count').textContent = d.shown + ' of ' + d.total;
-      return;
-    }
-    $('#count').textContent = '—';
+  $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : 'Your feed';
+  if (TV){
+    const clock = $('#tvclock');
+    if (clock) clock.textContent = new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
   }
-
-  const rows = tab.id === 'all' ? visible() : diversify(clustersFor(tab)).slice(0,200);
-  $('#count').textContent = rows.length ? rows.length + (rows.length===1?' story':' stories') : '—';
-
   if (!rows.length){
     const dead = Object.values(state.health).filter(h=>!h.ok).length;
-    $('#list').innerHTML = `<div class="state">
-      <p class="lead">${state.loading?'Still pulling feeds.':'Nothing in the stream yet.'}</p>
-      <p class="why">${ state.loading ? 'First load takes a few seconds while each source answers.'
-        : dead ? `${dead} source${dead>1?'s':''} came back empty — usually the free relays throttling. Hit Refresh, or set up your own relay (README).`
-        : 'Turn on a category, or widen the filter.'}</p></div>`;
+    $('#list')._html = '';
+    $('#list').innerHTML = `<div class="state"><p class="lead">${state.loading?'Gathering your stories…':'No stories found.'}</p><p class="why">${state.loading?'The latest reports are on their way.':dead?'Some sources are unavailable. Try Refresh now.':'Try another section or a wider filter.'}</p></div>`;
     return;
   }
-
-  $('#list').innerHTML = rows.map(function(c){ return rowHTML(c, terms); }).join('');
+  renderFeed(rows, terms);
 }
 
 function drawSources(){
@@ -3077,70 +2307,6 @@ $('#fadd').onclick = () => {
 };
 $('#furl').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#fadd').click(); });
 
-/* Takes anything YouTube-shaped — a stream, a channel, an @handle —
-   and always tries to end up holding a channel ID. */
-async function acceptVideo(input, label, cacheKey){
-  const raw = (input||'').trim();
-  if (!raw) return;
-  /* One lookup at a time. Rapid taps used to queue several relay fetches
-     at once and stall the whole page waiting on proxies that never answer. */
-  if (state.resolving){ $('#vidnote').textContent = 'Still looking up the last one…'; return; }
-  state.resolving = true;
-  try{ return await acceptVideoInner(raw, label, cacheKey); }
-  finally{ state.resolving = false; }
-}
-async function acceptVideoInner(raw, label, cacheKey){
-  const note = $('#vidnote');
-  note.textContent = 'Finding the channel…';
-
-  const parsed = parseVideo(raw);
-  if (parsed.indexOf('c:') === 0){
-    note.textContent = '';
-    if (!cacheKey) rememberChannel(parsed, label || 'Saved channel');
-    setVideo(parsed, label);
-    return;
-  }
-
-  /* an @handle, /c/ or /user/ URL has no ID in it — read the page for one */
-  const looksLikeChannelPage = /youtube\.com\/(@|c\/|user\/)/i.test(raw);
-  const lookupUrl = looksLikeChannelPage ? raw
-                  : (parsed ? 'https://www.youtube.com/watch?v=' + parsed : '');
-
-  if (!lookupUrl){
-    note.textContent = "That doesn't look like a YouTube link.";
-    return;
-  }
-  try{
-    const ch = await resolveChannel(lookupUrl);
-    if (ch){
-      if (cacheKey){ state.chans[cacheKey] = ch; }
-      if (!cacheKey) rememberChannel(ch, label || raw);
-      note.textContent = (label || 'Channel') + ' saved — it is in the channel list now.';
-      setVideo(ch, label);
-      return;
-    }
-    throw new Error('no id');
-  }catch(e){
-    if (parsed){
-      note.textContent = 'Using that one stream. It will stop working when they restart it — paste their channel link instead for a permanent one.';
-      rememberChannel(parsed, label || 'Saved stream');
-      setVideo(parsed);
-    } else {
-      note.textContent = "Couldn't read that channel. Try their /channel/UC… link.";
-    }
-  }
-}
-
-$('#vidgo').onclick = () => {
-  const val = $('#vidin').value;
-  $('#vidin').value = '';
-  acceptVideo(val);
-};
-$('#vidin').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#vidgo').click(); });
-$('#vidoff').onclick = () => { markChannel(null); $('#vidnote').textContent=''; setVideo(''); drawVidPicker(); };
-
-$('#vidpick').onchange = () => pickChannel($('#vidpick').value);
-
 $('#bskypick').onfocus = verifyAll;
 $('#bskypick').onchange = () => {
   const h = $('#bskypick').value;
@@ -3156,23 +2322,6 @@ $('#bskypick').onchange = () => {
   drawCats(); drawWatches(); drawBskyPicker(); drawSources(); save();
   pullWatch({kind:'user', v:h, cat:b.c}).then(function(){ drawSources(); drawTabs(); draw(); });
 };
-document.querySelectorAll('[data-vid]').forEach(b => b.onclick = () => setVideo(b.dataset.vid));
-function markChannel(el){
-  document.querySelectorAll('[data-yt],[data-vid]').forEach(x => x.setAttribute('aria-pressed','false'));
-  if (el) el.setAttribute('aria-pressed','true');
-}
-document.querySelectorAll('[data-yt]').forEach(b => b.onclick = () => {
-  markChannel(b);
-  const handle = b.dataset.yt;
-  const cached = state.chans[handle];
-  if (cached){                       // looked up once before — instant now
-    $('#vidnote').textContent = '';
-    setVideo(cached);
-    return;
-  }
-  acceptVideo('https://www.youtube.com/' + handle, b.textContent.trim(), handle);
-});
-
 $('#zipgo').onclick = async () => {
   const z = ($('#zip').value || '').trim();
   if (!/^\d{5}$/.test(z)){ $('#zip').value=''; $('#zip').placeholder='Five digits, e.g. 02896'; return; }
@@ -3247,14 +2396,14 @@ $('#runbuild').onclick = async () => {
       note.textContent = 'Build started. Give it about a minute, then pull down to refresh.';
       /* Poll for the new file rather than making you guess when it's done. */
       let tries = 0;
-      const was = LIVE_AT;
+      const was = PREBUILT_AT;
       const watch = setInterval(async function(){
         tries++;
-        await loadLiveMap();
-        if (LIVE_AT > was){
+        await loadPrebuilt();
+        if (PREBUILT_AT > was){
           clearInterval(watch);
-          note.textContent = 'Build finished — channels refreshed.';
-          drawAgentNote(); drawVidPicker();
+          note.textContent = 'Build finished — stories refreshed.';
+          loadAll();
         } else if (tries > 20){
           clearInterval(watch);
           note.textContent = 'Started, but the new file hasn\u2019t appeared yet. Check the Actions tab.';
@@ -3307,9 +2456,7 @@ $('#report').onclick = ()=>{
   document.body.removeChild(ta);
 };
 
-$('#tvbad').onclick = ()=> rejectStream();
-$('#tvprev').onclick = ()=> cycleChannel(-1);
-$('#tvnext').onclick = ()=> cycleChannel(1);
+$('#tvpause').onclick = toggleScroll;
 
 $('#tvexit').onclick = ()=>{
   const base = location.href.split('?')[0].split('#')[0];
@@ -3339,9 +2486,7 @@ document.addEventListener('visibilitychange', () => {
 window.onerror = function(msg, src, line){
   /* A cross-origin script that throws is reported to the page as the
      opaque string "Script error." with no file and line 0 — the browser
-     withholds the detail for security. That's almost always the YouTube
-     player or the font CDN, neither of which is our problem, and showing
-     a red banner for it just looks like the page is broken. */
+     withholds the detail for security. Ignore these unrelated CDN errors. */
   if (!msg || /^Script error\.?$/i.test(String(msg)) || (!src && !line)) return;
   if (document.getElementById('errbanner')) return;    // one is enough
   const b = document.createElement('div');
@@ -3353,99 +2498,38 @@ window.onerror = function(msg, src, line){
 };
 
 restore();
-if (!state.video && !PARAMS.video && !state.restored) state.video = DEFAULT_VIDEO;
 document.body.classList.add('dev-' + DEVICE);
 $('#devnote').textContent = ({tv:'Television', phone:'Phone', tablet:'Tablet', desktop:'Computer'})[DEVICE]
   + (TV ? ' · display mode' : ' · full controls');
 
 if (TV){
   document.body.classList.add('tv');
-  /* Dock the control cluster into the header as its last item. It used to
-     float fixed over the header's top-right corner, landing on top of the
-     clock with the buttons jumbled together. */
-  var tvbarEl = document.getElementById('tvbar');
-  var tvheadEl = document.querySelector('.streamhead');
-  if (tvbarEl && tvheadEl) tvheadEl.appendChild(tvbarEl);
-  if (PARAMS.cats)  state.on = new Set(PARAMS.cats.split(',').filter(Boolean));
+  $('.streamhead').appendChild($('#tvbar'));
+  $('.streamhead').insertAdjacentHTML('beforeend','<span class="tvclock" id="tvclock"></span>');
+  if (PARAMS.cats) state.on = new Set(PARAMS.cats.split(',').filter(Boolean));
   if (PARAMS.words) $('#watch').value = PARAMS.words;
   if (PARAMS.every) $('#interval').value = PARAMS.every;
-  if (PARAMS.video) state.video = PARAMS.video;
-  setInterval(function(){ tvPage++; draw(); }, TV_DWELL);
-  state.playing = true;              // the board has no play button to press
-  if (state.video) setVideo(state.video);
-
-  /* If the channel we opened on isn't broadcasting, move to one that is
-     rather than sitting on a black rectangle. */
-  setTimeout(async function(){
-    const cur = allChannels().filter(function(e){
-      return e.v === state.video || state.chans[e.h] === state.video;
-    })[0];
-    if (!state.video || (cur && liveNow(cur) === false)){ cycleChannel(1); return; }
-
-    /* Confirm what we're about to show actually plays; if not, step on. */
-    const id = state.liveIds && state.liveIds[state.video];
-    if (id && !(await playable(id))) cycleChannel(1);
-
-    const label = $('#tvchan');
-    if (label && cur) label.textContent = state.videoName || cur.n || '';
-  }, 2500);
-
-  /* Re-check every few minutes. A stream that ends mid-broadcast turns into
-     "Video unavailable" and would otherwise stay there all day. */
-  setInterval(async function(){
-    const id = state.liveIds && state.liveIds[state.video];
-    if (id && !(await playable(id))) cycleChannel(1);
-  }, 5*60*1000);
-
-  /* Optional hands-free rotation: add &rotate=15 for a new channel
-     every 15 minutes. Off unless asked for. */
-  const rot = parseInt(PARAMS.rotate, 10);
-  if (rot > 0) setInterval(function(){ cycleChannel(1); }, rot * 60000);
-  setInterval(draw, 30000);
 }
+const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!state.scrollRestored) state.autoScroll = !reducedMotion;
+if (reducedMotion) state.autoScroll = false;
+$('#scrollspeed').value = String(state.scrollSpeed);
+updateScrollControls();
 
 if (window.Notification && Notification.permission === 'granted'){
   $('#notify').textContent = 'Desktop alerts on'; $('#notify').classList.add('live');
 }
 restoreStream();
 loadPrebuilt();
-loadLiveMap().then(drawAgentNote);
-setTimeout(drawAgentNote, 4000);
-drawCats(); drawWatches(); drawMine(); drawCatalog(); drawVidPicker(); drawBskyPicker(); drawMyChannels(); drawSources();
+drawCats(); drawWatches(); drawMine(); drawCatalog(); drawBskyPicker(); drawSources();
 if (state.clusters.size){
   draw();
   if (state.restoredY) setTimeout(function(){ window.scrollTo(0, state.restoredY); }, 60);
 }
-if (state.video && !TV) setVideo(state.video);
-document.querySelectorAll('[data-vid]').forEach(b => {
-  if (b.dataset.vid === state.video) b.setAttribute('aria-pressed','true');
-});
-Object.keys(state.chans).forEach(h => {
-  if (state.chans[h] === state.video){
-    const b = document.querySelector('[data-yt="' + h + '"]');
-    if (b) b.setAttribute('aria-pressed','true');
-  }
-});
 loadAll(); schedule(); autoLocate();
 setInterval(draw, 60000);
 setInterval(loadWeather, 900000);
 setInterval(loadForecast, 1800000);
-/* Look for a newer stream id periodically, but only touch the player if the
-   stream has actually rotated. A blind re-mount interrupts playback for no
-   reason, which on a display left running all day is the whole problem. */
-setInterval(function(){
-  const v = state.video;
-  if (!v || v.indexOf('c:') !== 0 || !state.playing) return;
-  currentLive(v.slice(2)).then(function(id){
-    if (!id || state.video !== v) return;
-    if (state.liveIds && state.liveIds[v] === id) return;   // unchanged, leave it alone
-    state.liveIds = state.liveIds || {};
-    state.liveIds[v] = id;
-    state.liveAt = state.liveAt || {};
-    state.liveAt[v] = Date.now();
-    setVideo(v);                                            // genuinely rotated
-  }).catch(function(){});
-}, 1800000);
 window.__wireRan = true;
 </script>
 </body>
